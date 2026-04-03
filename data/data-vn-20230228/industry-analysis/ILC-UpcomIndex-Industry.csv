@@ -1,0 +1,4 @@
+﻿,ticker,marcap,price,numberOfDays,priceToEarning,peg,priceToBook,valueBeforeEbitda,dividend,roe,roa,ebitOnInterest,bookValuePerShare,interestMargin,badDebtPercentage,currentPayment,quickPayment,grossProfitMargin,operatingProfitMargin,postTaxMargin,debtOnEquity,debtOnEbitda,income5year,sale5year,income1quarter,sale1quarter,nextIncome,nextSale,rsi,rs
+0,ILC,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+1,SDA,147,5600,1,63.0,-0.7,0.7,121.0,0.0,0.01,0.007,-1.0,,,,1.1,1.1,0.066,,0.016,0.1,5.0,,0.104,,3.086,,,32.6,40.0
+2,VCM,64,21400,0,305.2,-4.1,1.0,-49.0,0.0,0.003,0.002,-134.0,,,,2.6,2.6,,,0.012,0.0,-0.3,-0.552,-0.328,39.361,-0.076,,,59.5,

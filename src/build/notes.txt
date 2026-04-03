@@ -1,0 +1,338 @@
+Now we’re talking like a real quant researcher. I’ll do exactly what you asked:
+
+> **(1) Diagnose current VN market regime (2026)**
+> **(2) Identify underexploited data sources that can improve your model**
+
+---
+
+# 🧠 1. Current Vietnam Market Regime (VERY important)
+
+## 📊 Macro regime: **“Growth + Liquidity + Structural distortion”**
+
+### ✅ Strong growth + policy support
+
+* GDP target ~6–10% depending on estimate ([The Investor][1])
+* Public investment + FDI = key drivers ([SSI][2])
+* Earnings growth ~14–20% expected ([Mirae Asset Securities][3])
+
+👉 This is a **bullish macro backbone**
+
+---
+
+### ⚠️ But market structure is NOT healthy
+
+#### 1. Liquidity-driven rally
+
+* VN-Index +30–40% in 2025 driven by **retail inflows** ([SSI][2])
+
+#### 2. Narrow leadership (VERY important)
+
+* Rally dominated by **Vingroup ecosystem (VHM, VIC, VRE)** ([ACBS][4])
+
+👉 This creates:
+
+* **index ≠ market reality**
+* strong factor distortions
+
+---
+
+### ⚠️ Capital flow divergence
+
+* Domestic investors = **net buyers**
+* Foreign investors = **net sellers** ([Mirae Asset Securities][5])
+
+👉 This is HUGE signal:
+
+> VN market is currently **retail-driven, not institutional-driven**
+
+---
+
+### ⚠️ Macro pressure signals emerging
+
+* USD/VND rising ([Mirae Asset Securities][5])
+* Oil spike (war-related) ([Mirae Asset Securities][5])
+* Credit tightening risk (real estate sensitive) ([Reuters][6])
+* Interest rates stabilizing but still impactful ([vietnam.vn][7])
+
+---
+
+## 🧠 Regime summary (quant view)
+
+```text
+Regime = 
++ Growth (bullish)
++ Liquidity (bullish)
++ Retail dominance (unstable alpha)
++ Macro shocks (volatile)
++ Sector concentration (inefficient pricing)
+```
+
+👉 Translation:
+
+> This is a **high-alpha but inefficient market**
+> → PERFECT for quant strategies
+
+---
+
+# 🔥 2. Where your current model is probably weak
+
+Most VN stock DL models only use:
+
+* Price
+* Volume
+* Basic indicators
+
+👉 That means you are missing the REAL drivers:
+
+---
+
+# 🚀 3. High-Impact Data Sources (Alpha Opportunities)
+
+I’ll rank them like a hedge fund would:
+
+---
+
+# 🥇 Tier 1 (MUST HAVE — biggest edge)
+
+## (A) Order Flow / Investor Type Data
+
+From:
+
+* HOSE / FiinPro / SSI
+
+Key signals:
+
+* Retail vs foreign flow divergence
+* Block trades
+
+Example:
+
+* Foreign selling but price ↑ → **strong domestic absorption signal**
+
+👉 Your model should learn:
+
+```
+if (foreign_sell && price_up) → bullish continuation
+```
+
+---
+
+## (B) Credit & Liquidity Data (CRITICAL for VN)
+
+Why?
+
+* Vietnam = credit-driven economy
+
+Data:
+
+* Credit growth
+* Margin lending
+* Interbank rates
+
+Evidence:
+
+* Credit growth directly drives economy & market ([Reuters][8])
+
+👉 This is **hidden macro alpha**
+
+---
+
+## (C) Sector Rotation Signals
+
+Because:
+
+* Market is narrow (Vingroup dominance)
+
+Data:
+
+* Sector index returns
+* Industry flows
+
+Example:
+
+* Banks ↑ → real estate lagged reaction (like VHM)
+
+---
+
+# 🥈 Tier 2 (HIGH alpha, underused)
+
+## (D) FX + USD strength
+
+* USD/VND trend (very important in EM)
+
+Why:
+
+* Strong USD → capital outflow → pressure on equities
+
+---
+
+## (E) Commodity linkage
+
+* Oil (inflation)
+* Steel (construction → real estate)
+
+Evidence:
+
+* Oil spike already impacting macro ([Mirae Asset Securities][5])
+
+---
+
+## (F) Policy signals (VERY underrated)
+
+Vietnam is policy-driven:
+
+* Interest rate changes
+* Credit caps
+* Real estate regulation
+
+Example:
+
+* Credit tightening → real estate stocks drop ([Reuters][6])
+
+👉 You need:
+
+* NLP model on government news
+
+---
+
+# 🥉 Tier 3 (advanced alpha layer)
+
+## (G) Retail sentiment (Vietnam-specific edge)
+
+Because:
+
+* Market is retail-driven
+
+Sources:
+
+* Facebook groups
+* Zalo communities
+* Local forums
+
+👉 This is HUGE in Vietnam (bigger than US Twitter)
+
+---
+
+## (H) Corporate ecosystem graph
+
+Example:
+
+* Vingroup ecosystem
+
+Graph:
+
+```
+VIC → VHM → VRE → banks → suppliers
+```
+
+👉 Shock in one → propagates
+
+---
+
+## (I) Real-world proxies (alt data)
+
+For real estate (VHM):
+
+* Construction activity (satellite / permits)
+* Google Maps traffic to projects
+* Land auction data
+
+---
+
+# 🧩 4. How to integrate into your model
+
+## Feature tensor (advanced)
+
+```python
+features = [
+    price_features,
+    order_flow_features,
+    macro_features,
+    fx_features,
+    commodity_features,
+    sentiment_features
+]
+```
+
+---
+
+## 🔥 Key upgrade: “Regime-aware model”
+
+Instead of:
+
+```python
+y = model(x)
+```
+
+Do:
+
+```python
+regime = regime_model(macro_data)
+y = model(x, regime)
+```
+
+---
+
+# 🧠 5. What signals matter MOST right now (2026)
+
+Based on current data:
+
+## 🔥 Top signals to prioritize
+
+### 1. Domestic vs foreign flow divergence
+
+→ strongest short-term predictor
+
+### 2. Credit conditions
+
+→ drives real estate (VHM)
+
+### 3. USD/VND trend
+
+→ capital flow proxy
+
+### 4. Policy news (real estate + banking)
+
+→ regime shifts
+
+---
+
+# ⚠️ Final insight (this is important)
+
+> Vietnam is NOT an efficient market yet
+
+Which means:
+
+* Prices lag information
+* Retail creates mispricing
+* Macro signals propagate slowly
+
+👉 This is EXACTLY where deep learning + alt data shines
+
+---
+
+# 🚀 If you want next step
+
+We can now build:
+
+👉 **Vietnam-specific alpha model**
+
+* Data sources (FiinPro + macro APIs)
+* Feature engineering (flow + macro + sentiment)
+* Transformer architecture
+* Backtest on VHM / VN30
+
+Just say:
+
+**“build VN quant model”**
+
+and I’ll turn this into actual code + system design.
+
+[1]: https://theinvestor.vn/vietnams-stock-market-may-extend-gains-in-2026-on-macro-tailwinds-earnings-growth-broker-d18116.html?utm_source=chatgpt.com "Vietnam's stock market may extend gains in 2026 on macro ..."
+[2]: https://www.ssi.com.vn/en/organization-customer/monthly-market-outlook?utm_source=chatgpt.com "Monthly Market Outlook"
+[3]: https://masvn.com/api/attachment/file/1768212082312-MASVN_RS_Strategy_2026_01.pdf?utm_source=chatgpt.com "Vietnam strategy report"
+[4]: https://acbs.com.vn/en/report/market-strategy-report-2026-building-strategic-positioning?utm_source=chatgpt.com "MARKET STRATEGY REPORT 2026 - BUILDING ... - ACBS"
+[5]: https://masvn.com/api/attachment/file/1774224246928-Weekly_20260323_EN.pdf?utm_source=chatgpt.com "[Weekly strategy] March 23, 2026"
+[6]: https://www.reuters.com/world/asia-pacific/vietnam-central-bank-cuts-credit-growth-target-15-after-warnings-asset-bubbles-2026-01-12/?utm_source=chatgpt.com "Vietnam central bank cuts credit growth target to 15% after warnings on asset bubbles"
+[7]: https://www.vietnam.vn/en/mat-bang-lai-suat-co-the-on-dinh-tu-giua-nam?utm_source=chatgpt.com "Interest rates may stabilize from mid-year."
+[8]: https://www.reuters.com/world/asia-pacific/vietnam-faces-external-challenges-growing-10-next-year-central-bank-says-2025-12-29/?utm_source=chatgpt.com "Vietnam faces external challenges to growing 10% next year, central bank says"

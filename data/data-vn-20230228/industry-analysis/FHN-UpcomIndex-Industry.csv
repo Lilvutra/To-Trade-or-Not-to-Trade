@@ -1,0 +1,4 @@
+﻿,ticker,marcap,price,numberOfDays,priceToEarning,peg,priceToBook,valueBeforeEbitda,dividend,roe,roa,ebitOnInterest,bookValuePerShare,interestMargin,badDebtPercentage,currentPayment,quickPayment,grossProfitMargin,operatingProfitMargin,postTaxMargin,debtOnEquity,debtOnEbitda,income5year,sale5year,income1quarter,sale1quarter,nextIncome,nextSale,rsi,rs
+0,FHN,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+1,AFX,355,10152,-2,12.5,0.4,0.8,76.2,0.0,0.069,0.033,0.1,,,,1.4,1.3,0.02,,0.002,1.3,43.6,0.043,0.124,-0.849,0.708,0.024,0.1,37.8,34.0
+2,TH1,73,5400,0,-0.6,0.0,-2.1,-2.1,0.0,-13.87,-0.208,0.8,,,,0.8,0.6,0.074,,0.045,-6.5,-2.1,,0.125,16.841,0.85,,,96.6,70.0
