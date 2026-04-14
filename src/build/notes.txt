@@ -1,4 +1,4 @@
-Now we’re talking like a real quant researcher. I’ll do exactly what you asked:
+
 
 > **(1) Diagnose current VN market regime (2026)**
 > **(2) Identify underexploited data sources that can improve your model**
@@ -336,3 +336,25 @@ and I’ll turn this into actual code + system design.
 [6]: https://www.reuters.com/world/asia-pacific/vietnam-central-bank-cuts-credit-growth-target-15-after-warnings-asset-bubbles-2026-01-12/?utm_source=chatgpt.com "Vietnam central bank cuts credit growth target to 15% after warnings on asset bubbles"
 [7]: https://www.vietnam.vn/en/mat-bang-lai-suat-co-the-on-dinh-tu-giua-nam?utm_source=chatgpt.com "Interest rates may stabilize from mid-year."
 [8]: https://www.reuters.com/world/asia-pacific/vietnam-faces-external-challenges-growing-10-next-year-central-bank-says-2025-12-29/?utm_source=chatgpt.com "Vietnam faces external challenges to growing 10% next year, central bank says"
+
+
+
+
+
+
+
+
+
+
+
+
+
+Market Data
+    ↓
+Feature Extraction
+    ↓
+Agent Detection Layer
+    ↓
+Regime Classification
+    ↓
+Trading / Risk Decision

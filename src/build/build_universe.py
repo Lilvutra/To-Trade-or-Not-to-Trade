@@ -2,7 +2,7 @@
 # What do I mean by universe? regime here it is
 # Since we need to know which is the current macro regime so that we can focus on the right set of stocks and 
 # but how can we know the current macro regime?
-
+# We will use a combination of macroeconomic indicators, market data, and machine learning techniques to identify the current regime
 
 # Diagnose current VN market regime (2026)**
 # Identify underexploited data sources that can improve your model**
@@ -60,7 +60,6 @@ from matplotlib import text
 # Build regime model using macro data and market indicators
 
 # macro data = [interest rates, credit growth, usd/vnd, oil prices, vnindex performance, retail inflows, etc] ? 
-# kMEANS clustering to identify regimes based on macro data and market indicators   s
 
 
 
