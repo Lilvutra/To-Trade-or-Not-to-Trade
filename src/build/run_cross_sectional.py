@@ -61,18 +61,21 @@ def neutralize_by_industry(group, features, return_col="return_1"):
 
     # Work on a copy so the caller's DataFrame is not mutated.
     group = group.copy()
+    print(f"group: {group}")
 
     # Convert the industry labels into binary (0/1) columns.
     # drop_first=True drops one industry (the reference category) to avoid
     # perfect multicollinearity: if you have bank/steel/energy, you only need
     # bank and steel — a stock with both = 0 is implicitly "energy".
     industry_dummies = pd.get_dummies(group["industry"], drop_first=True, dtype=float)
+    print(f"industry dummies: {industry_dummies}")
 
     # Neutralize every feature AND the return column.
     # Purpose: remove the part of each variable explained by industry membership,
     # so the FM regression only sees within-industry variation.
     for col in features + [return_col]:
         y = group[col]
+        print(f"y: {y}")
 
         # has_constant="add" forces an explicit intercept column even though
         # statsmodels could detect one is already present.
@@ -80,14 +83,17 @@ def neutralize_by_industry(group, features, return_col="return_1"):
         # dummy). Without it, OLS is forced through zero and cannot correctly
         # remove the reference industry's mean, leaving biased residuals.
         X = sm.add_constant(industry_dummies, has_constant="add")
+        print(f"X: {X}")
 
         try:
             # Fit y = β₀ + β₁·industry₁ + β₂·industry₂ + … + ε
             # The residual ε is the within-industry deviation — how this stock
             # differs from its own industry average on this date.
             residuals = sm.OLS(y, X).fit().resid
+            print(f"residuals: {residuals}")
             # Replace the raw value with the industry-demeaned residual.
             group[col] = residuals.values
+            print(f"group[col]: {group[col]}")
         except Exception:
             # A rank-deficient matrix (e.g. only one stock in an industry)
             # makes OLS fail. Skip neutralization for this column; the raw
@@ -181,6 +187,8 @@ def run_cross_sectional_regression(
     # Stack all per-date coefficient rows into a (T × K) DataFrame.
     # Rows = dates, columns = features + 'const'.
     factor_df = pd.DataFrame(factor_returns).set_index("date")
+    
+    print(f"factor_df: {factor_df}")
     return factor_df
 
 
@@ -230,11 +238,11 @@ def fama_macbeth_summary(factor_df):
         # Regressing the factor return series on a vector of ones is equivalent
         # to estimating the mean; the HAC-robust standard error of that estimate
         # corrects for autocorrelation (factor returns on adjacent days are not
-        # independent), giving valid t-statistics.
-        model = sm.OLS(series.values, np.ones(n)).fit(
+        # independent), giving valid t-statistics. 
+        model = sm.OLS(series.values, np.ones(n)).fit( # 
             cov_type="HAC", cov_kwds={"maxlags": lags}
         )
-        nw_se[col] = model.bse[0]  # bse[0] = standard error of the intercept = NW-SE of the mean
+        nw_se[col] = model.bse[0]  # bse[0] = standard error of the intercept = NW-SE of the mean #bse is 
 
     summary = pd.DataFrame(
         {

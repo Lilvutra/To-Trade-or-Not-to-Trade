@@ -307,26 +307,7 @@ Which means:
 * Retail creates mispricing
 * Macro signals propagate slowly
 
-👉 This is EXACTLY where deep learning + alt data shines
 
----
-
-# 🚀 If you want next step
-
-We can now build:
-
-👉 **Vietnam-specific alpha model**
-
-* Data sources (FiinPro + macro APIs)
-* Feature engineering (flow + macro + sentiment)
-* Transformer architecture
-* Backtest on VHM / VN30
-
-Just say:
-
-**“build VN quant model”**
-
-and I’ll turn this into actual code + system design.
 
 [1]: https://theinvestor.vn/vietnams-stock-market-may-extend-gains-in-2026-on-macro-tailwinds-earnings-growth-broker-d18116.html?utm_source=chatgpt.com "Vietnam's stock market may extend gains in 2026 on macro ..."
 [2]: https://www.ssi.com.vn/en/organization-customer/monthly-market-outlook?utm_source=chatgpt.com "Monthly Market Outlook"

@@ -192,277 +192,66 @@ REGIME_FEATURES: dict[int, list[str]] = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Regime report metadata
-# ─────────────────────────────────────────────────────────────────────────────
-
-REGIME_DESCRIPTIONS: dict[int, dict] = {
-    REGIME_ID["QUIET_BEAR"]: {
-        "name":        "QUIET_BEAR",
-        "label":       "0 — Quiet Bear",
-        "conditions":  "Low volatility + downtrend (or negative momentum in sideways band)",
-        "dominant_force": (
-            "Retail drift downward without large panic spikes. "
-            "Price bleeds slowly below its moving average as sellers outnumber buyers on low conviction."
-        ),
-        "signal_type": "Mean-reversion",
-        "trading_edge": (
-            "Oversold extremes are the opportunity. "
-            "When zscore_return and dist_ma reach extreme lows alongside RSI divergence, "
-            "a short-term bounce is likely within 3–5 sessions (Obs 1 — retail herding exhaustion)."
-        ),
-        "feature_descriptions": {
-            "zscore_return":         "Return normalised by 20-day vol. Extreme negative values signal oversold.",
-            "rsi_divergence":        "Price ↓ but RSI ↑ (bullish divergence) → reversal setup forming.",
-            "dist_ma":               "Distance of close from MA5. Strongly negative = price stretched below trend.",
-            "close_position":        "Where close landed in the day's range (0 = low, 1 = high). Low = sellers in control.",
-            "gap":                   "Overnight gap vs prior close. Negative gaps add to selling pressure before MA reacts.",
-            "vol_relative":          "5-day vol std / MA5. A spike here warns of hidden selling pressure in a quiet regime.",
-            "retail_exhaustion":     "(1 − close_position) × vol_spike. High = retail panic capitulation.",
-            "herd_momentum_10":      "Fraction of up-days in last 10 sessions. Very low → bearish consensus; bounce risk rising.",
-            "t2_forced_selling":     "Sharp drop 2 days ago × current vol spike. T+2 settlement forces today's selling.",
-            "intraday_distribution": "Up day in price but close near low. Institutions used the rally to sell at ATC.",
-            "conviction_close":      "close_position × log(1 + vol_spike). Low = sellers dominated; useful reversal trigger if it turns up.",
-        },
-    },
-    REGIME_ID["PANIC_BEAR"]: {
-        "name":        "PANIC_BEAR",
-        "label":       "1 — Panic Bear",
-        "conditions":  "High volatility + downtrend (or negative momentum in high-vol sideways band)",
-        "dominant_force": (
-            "Margin cascades, T+2 trapped sellers, and limit-down queue dynamics. "
-            "Two-phase forced liquidation: broker margin calls at T+1 gap-down, "
-            "then retail panic selling into the void."
-        ),
-        "signal_type": "Exhaustion / capitulation bottom detection",
-        "trading_edge": (
-            "Identify when the cascade has run its course. "
-            "margin_cascade_duration ≥ 3 + rsi_divergence + low conviction_close flipping up "
-            "= high-probability capitulation bottom (Obs 6 — margin exhaustion)."
-        ),
-        "feature_descriptions": {
-            "zscore_return":           "Magnitude of today's panic move relative to recent vol.",
-            "volume_spike":            "Vol / 20-day avg vol. Abnormally high volume on down days = exhaustion signal.",
-            "panic":                   "Binary: down day AND vol_spike > 1.5×. Composite panic flag.",
-            "limit_down_streak":       "Consecutive circuit-breaker down days. Vietnam-specific forced-seller queue.",
-            "down_vol_pressure":       "Selling pressure intensity: negative log-return × volume change.",
-            "rsi_divergence":          "RSI makes higher low while price makes lower low → bullish divergence near capitulation.",
-            "gap":                     "Large negative gap = continuation; small gap after panic = potential exhaustion.",
-            "limit_down_conviction":   "limit_down × vol_spike. Large queue of trapped sellers → continuation OR capitulation bottom.",
-            "t2_cascade":              "3-day cumulative drop > 8% × vol spike. All three T+2 buyer cohorts stuck simultaneously.",
-            "smart_money_down":        "Down day + high volume. Institutions/foreigners distributing into retail panic.",
-            "range_expansion":         "Daily range / 20-day avg range. Panic sessions have abnormally wide ranges; very high = fear peak.",
-            "margin_cascade_duration": "Count of extreme-down days (< −2σ) in last 3 sessions. ≥ 3 = forced liquidation likely exhausted.",
-            "retail_exhaustion":       "High value = retail dominated the sell-off → potential capitulation bottom signal.",
-            "conviction_close":        "Very low = maximum fear. Turning up after multi-day panic = reversal trigger.",
-        },
-    },
-    REGIME_ID["QUIET_BULL"]: {
-        "name":        "QUIET_BULL",
-        "label":       "2 — Quiet Bull",
-        "conditions":  "Low volatility + uptrend (or positive momentum in low-vol sideways band)",
-        "dominant_force": (
-            "Foreign / institutional accumulation on dips. "
-            "Price drifts steadily above MA5 on moderate volume with occasional pullbacks absorbed quickly."
-        ),
-        "signal_type": "Trend-following / early acceleration detection",
-        "trading_edge": (
-            "Detect early signs of trend acceleration before price breaks away. "
-            "delta_dist turning positive + macd_hist_slope turning up (delta_macd_combined) "
-            "= momentum inflection before it is visible in price (Obs 4 — smart money accumulation)."
-        ),
-        "feature_descriptions": {
-            "delta_dist":              "Day-over-day change in distance from MA5. Positive = price accelerating away from trend.",
-            "macd_hist_slope":         "MACD histogram turning point. Upward turn = momentum inflection before price crossover.",
-            "delta_macd_combined":     "delta_dist × macd_hist_slope. Confluence of both signals; strong when both positive.",
-            "mom_5":                   "5-day price momentum. Captures the steady drift characteristic of this regime.",
-            "vol_accel":               "Volume acceleration. Rising vol before price breakout = quiet accumulation phase ending.",
-            "rsi_14":                  "RSI(14) confirms trend health. Sustained 50–70 band = healthy bull; above 70 = extended.",
-            "smart_money_up":          "Up day + vol spike. Institutions absorbing retail selling; persistent = accumulation intact.",
-            "volume_price_divergence": "Price ↑ but volume fading. Rally losing institutional fuel → reduce exposure.",
-            "intraday_distribution":   "Up day but close near low. ATC selling by institutions; repeated = topping pattern forming.",
-            "limit_open_reversal":     "Limit-up yesterday + close near low today. Queued buyers exhausted instantly → distribution top.",
-            "conviction_close":        "High = buyers held ground with volume; confirms trend health. Declining = accumulation fading.",
-        },
-    },
-    REGIME_ID["VOLATILE_BULL"]: {
-        "name":        "VOLATILE_BULL",
-        "label":       "3 — Volatile Bull",
-        "conditions":  "High volatility + uptrend (or positive momentum in high-vol sideways band)",
-        "dominant_force": (
-            "Retail FOMO, limit-up queue momentum, and breakout continuation. "
-            "Vietnam price limits create structural momentum: unmatched limit-up buy orders "
-            "spill into the next open, compounding the move."
-        ),
-        "signal_type": "Momentum / breakout continuation",
-        "trading_edge": (
-            "Ride the burst while it has volume fuel; exit when FOMO exhaustion signals appear. "
-            "limit_up_conviction + vol_accel = continuation. "
-            "High retail_exhaustion (closed near low + volume spike) = FOMO top forming (Obs 1 + 2)."
-        ),
-        "feature_descriptions": {
-            "delta_dist":          "Price vs MA5 velocity. High = price stretching fast above trend = breakout fuel remaining.",
-            "macd_hist_slope":     "MACD histogram acceleration. Upward = momentum still building; flat/down = nearing peak.",
-            "gap":                 "Overnight gap on breakout days. Large positive gap = institutional conviction in the move.",
-            "vol_accel":           "Volume surge. Fuel for continuation; fading vol during limit-up streak = top approaching.",
-            "z_window":            "5-day z-score vs MA5. Very high (> 3) = overbought; caution on new longs.",
-            "limit_up_streak":     "Consecutive limit-up days. Vietnam FOMO burst; longest streaks precede sharp reversals.",
-            "zscore_return":       "Size of today's move vs recent vol. Confirms whether today's candle is genuine breakout.",
-            "limit_up_conviction": "limit_up × vol_spike. Large unmatched-buyer queue → strong statistical continuation next session.",
-            "range_expansion":     "Daily range vs 20-day avg. Wide range + positive return = real breakout; narrow = absorption at resistance.",
-            "smart_money_up":      "Up day + high volume. Institutional participation distinguishes genuine breakouts from retail-only pumps.",
-            "retail_exhaustion":   "Closed near low + vol spike. In this regime, HIGH value = FOMO buyers trapped → distribution top.",
-            "conviction_close":    "High = buyers held their ground: continuation likely. Sudden drop = distribution has begun.",
-        },
-    },
-}
-
-
-def regime_feature_report(regime_id: int | None = None) -> str:
-    """
-    Return a formatted plain-text report describing one or all regimes.
-
-    Parameters
-    ----------
-    regime_id : int or None
-        If given, report only that regime (0–3). If None, report all four.
-
-    Returns
-    -------
-    str
-        Multi-line report suitable for printing or embedding in a notebook.
-
-    Example
-    -------
-    >>> print(regime_feature_report())          # all regimes
-    >>> print(regime_feature_report(1))         # PANIC_BEAR only
-    """
-    ids = [regime_id] if regime_id is not None else sorted(REGIME_DESCRIPTIONS)
-    lines: list[str] = []
-
-    for rid in ids:
-        d = REGIME_DESCRIPTIONS[rid]
-        sep = "═" * 72
-        lines += [
-            "",
-            sep,
-            f"  {d['label']}",
-            sep,
-            f"  Conditions    : {d['conditions']}",
-            f"  Dominant force: {d['dominant_force']}",
-            f"  Signal type   : {d['signal_type']}",
-            f"  Trading edge  : {d['trading_edge']}",
-            "",
-            "  Features",
-            "  " + "─" * 68,
-        ]
-        for feat, desc in d["feature_descriptions"].items():
-            lines.append(f"  {feat:<28} {desc}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # 1. REGIME DETECTION (no look-ahead)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def detect_regime(
     g: pd.DataFrame,
-    vol_window:     int   = 20,   # short-term volatility window
-    vol_baseline:   int   = 252,  # long-run vol anchor (1 year)
-    trend_window:   int   = 20,   # up-day fraction window
-    bull_threshold: float = 0.55, # lowered from 0.60 — less strict uptrend requirement
-    bear_threshold: float = 0.45, # raised  from 0.40 — less strict downtrend requirement
-    mom_window:     int   = 20,   # momentum window for resolving the sideways zone
-    close_col: str = "Close",
-    time_col:  str = "TradingDate",
+    vol_window: int = 20, # short-term volatility window for regime classification (e.g. 20-day)
+    vol_baseline: int = 252, # long-term volatility baseline for regime classification (e.g. 1-year trading days)
+    trend_window: int = 20, # window for calculating up-day fraction to determine trend (e.g. 20-day)
+    bull_threshold: float = 0.60,  # fraction of up-days above which we classify as uptrend (e.g. >60% up-days)
+    bear_threshold: float = 0.40, # fraction of up-days below which we classify as downtrend (e.g. <40% up-days)
+    close_col: str = "Close", 
+    time_col: str = "TradingDate",
 ) -> pd.Series:
     """
     Assign a regime label to every row using only past information.
 
-    Three axes (all strictly historical, no look-ahead):
+    Two independent axes — both use only data available at each bar:
 
-    1. Volatility axis
-         log_ret     = diff(log(close))
-         current_vol = rolling(vol_window).std(log_ret)
-         vol_median  = rolling(vol_baseline).median(current_vol)
-         is_high_vol = current_vol > vol_median
-       Compares current vol to its own long-run median so the threshold
-       adapts to each stock's baseline volatility level.
+    Volatility axis
+      current_vol = rolling(vol_window).std(log_ret)
+      vol_median  = rolling(vol_baseline).median(current_vol)  ← long-run anchor
+      is_high_vol = current_vol > vol_median
 
-    2. Trend axis  (up-day fraction)
-         fraction_up  = rolling(trend_window).mean(close > close.shift(1))
-         is_uptrend   = fraction_up > bull_threshold   (default 55%)
-         is_downtrend = fraction_up < bear_threshold   (default 45%)
-       The 45-55% band is "sideways" — many trending days in Vietnam land
-       here because drift is smooth rather than monotone.
-
-    3. Momentum axis  — resolves the sideways zone
-         cum_ret = close / close.shift(mom_window) - 1
-         is_up_momentum   = cum_ret > 0 # can set to > 0.02 for example
-         is_down_momentum = cum_ret < 0
-       A day in the sideways band that has a positive cumulative return over
-       the last mom_window days is trending UP, just not sharply enough to
-       clear the fraction_up threshold.  Without this axis, all sideways
-       days default to QUIET_BEAR even when price has risen 3-4% — the
-       root cause of the previous 76% QUIET_BEAR over-classification.
+    Trend axis
+      fraction_up  = rolling(trend_window).mean(daily_up_flag)
+      is_uptrend   = fraction_up > bull_threshold   (default >60% up-days)
+      is_downtrend = fraction_up < bear_threshold   (default <40% up-days)
+      sideways = between thresholds → classified by vol only → QUIET_BEAR
 
     Regime matrix
-    ─────────────────────────────────────────────────────
-      is_uptrend   & is_high_vol              → VOLATILE_BULL (3)
-      is_uptrend   & ~is_high_vol             → QUIET_BULL    (2)
-      is_downtrend & is_high_vol              → PANIC_BEAR    (1)
-      is_downtrend & ~is_high_vol             → QUIET_BEAR    (0)
-      sideways     & is_high_vol  & up_mom    → VOLATILE_BULL (3)  ← new
-      sideways     & ~is_high_vol & up_mom    → QUIET_BULL    (2)  ← new
-      sideways     & is_high_vol  & down_mom  → PANIC_BEAR    (1)  ← new
-      sideways     & ~is_high_vol & down_mom  → QUIET_BEAR    (0)  ← new
-    ─────────────────────────────────────────────────────
+      is_uptrend  &  is_high_vol  →  VOLATILE_BULL (3)
+      is_uptrend  & ~is_high_vol  →  QUIET_BULL    (2)
+      is_downtrend & is_high_vol  →  PANIC_BEAR    (1)
+      otherwise                   →  QUIET_BEAR    (0)
+      
+    With this current setup, it might be good for baseline regime classification and match traditional academic models
+    But for Vietnam, it is incomplete and misses key structural drivers
     """
-    g     = g.sort_values(time_col).copy()
+    g = g.sort_values(time_col).copy()
     close = g[close_col]
 
-    # ── Volatility axis ───────────────────────────────────────────────────────
-    # Log returns are more stable than simple returns for vol estimation —
-    # large daily moves (Vietnam limit-hits) are dampened by the log transform.
-    
-    log_ret     = np.log(close).diff()
+    # Volatility axis
+    log_ret     = np.log(close).diff() # log return is more stable for volatility estimation than simple returns, especially in a market like Vietnam with occasional large jumps. The rolling std of log returns over vol_window gives us a measure of current volatility. We then compare this to a long-term median to determine if we're in a high-volatility regime. 
     current_vol = log_ret.rolling(vol_window).std()
     vol_median  = current_vol.rolling(vol_baseline).median()
     vol_median  = vol_median.fillna(current_vol.expanding().median())
     is_high_vol = current_vol > vol_median
 
-    # ── Trend axis (up-day fraction) ──────────────────────────────────────────
+    # Trend axis
     daily_up    = (close.diff() > 0).astype(int)
     fraction_up = daily_up.rolling(trend_window).mean()
     fraction_up = fraction_up.fillna(daily_up.expanding().mean())
 
     is_uptrend   = fraction_up > bull_threshold
     is_downtrend = fraction_up < bear_threshold
-    is_sideways  = ~is_uptrend & ~is_downtrend
 
-    # ── Momentum axis (resolves sideways zone) ────────────────────────────────
-    # cum_ret at row t = close[t] / close[t - mom_window] - 1
-    # Fully historical — no look-ahead.
-    cum_ret        = close.pct_change(mom_window)
-    cum_ret        = cum_ret.fillna(0)
-    is_up_momentum = cum_ret >= 0   # positive return → upward drift
-
-    # ── Regime matrix ─────────────────────────────────────────────────────────
-    # Start with all QUIET_BEAR, then overwrite in priority order.
     regime = pd.Series(REGIME_ID["QUIET_BEAR"], index=g.index, name="regime")
-
-    # Clear trends — same as before
     regime[is_uptrend   &  is_high_vol] = REGIME_ID["VOLATILE_BULL"]
     regime[is_uptrend   & ~is_high_vol] = REGIME_ID["QUIET_BULL"]
     regime[is_downtrend &  is_high_vol] = REGIME_ID["PANIC_BEAR"]
-    regime[is_downtrend & ~is_high_vol] = REGIME_ID["QUIET_BEAR"]
-
-    # Sideways zone — resolved by momentum direction
-    regime[is_sideways &  is_high_vol &  is_up_momentum] = REGIME_ID["VOLATILE_BULL"]
-    regime[is_sideways & ~is_high_vol &  is_up_momentum] = REGIME_ID["QUIET_BULL"]
-    regime[is_sideways &  is_high_vol & ~is_up_momentum] = REGIME_ID["PANIC_BEAR"]
-    regime[is_sideways & ~is_high_vol & ~is_up_momentum] = REGIME_ID["QUIET_BEAR"]
 
     return regime
 
