@@ -109,89 +109,53 @@ REGIME_NAME = {v: k for k, v in REGIME_ID.items()} # reverse mapping for conveni
 # The training pipeline should slice df by regime, then use only these columns.
 REGIME_FEATURES: dict[int, list[str]] = {
     REGIME_ID["QUIET_BEAR"]: [
-        # Core mean-reversion signals
-        "zscore_return_neg",      # oversold extreme only (0 on up days) → bounce predictor
-        "rsi_divergence",         # price ↑ but RSI ↓ (or vice versa) → reversal setup
-        "dist_ma",                # distance from MA5 (oversold when very negative)
-        "close_position",         # where close landed in today's high-low range
-        "gap",                    # overnight gap: sentiment before MA reacts
-        "vol_relative",           # relative vol spike even in quiet regime = warning
-        # Obs 1: fresh seller exhaustion — isolated selling, no cascade → bounce signal
-        "seller_exhaustion_fresh",  # high when: down day + closed near low + vol spike + NO prior cascade
-        "herd_momentum_10",         # 10-day fraction of up-days: low = bearish consensus building
-        # Obs 3: T+2 settlement
-        "t2_forced_selling",      # sharp drop 2 days ago × current volume spike
-        # Obs 5: ATC distortion
-        "intraday_distribution",  # up day but closed near low = institutional ATC selling
-        # Universal mean-reversion
-        "range_expansion_up",     # wide range on up day = FOMO overshoot → reversal (universal signal)
-        "conviction_close",       # low value confirms weakness; reversal if it turns up
+        # Core mean-reversion (|t| ≥ 2.5 in joint FM)
+        "dist_ma",                  # −4.62: primary MA-reversion anchor; price below MA5 → snap-back
+        "gap",                      # +3.33: gap-down = overnight forced selling exhaustion
+        "delta_dist",               # +2.96: MA velocity (significant even in bear — bounce momentum)
+        "macd_hist_slope",          # −2.85: MACD turning negative in bear = trend confirmation
+        "delta_macd_combined",      # +2.55: confluence of both momentum signals
+        # Supporting (1.5 ≤ |t| < 2.5)
+        "conviction_close",         # +1.90: order-flow proxy; rising = buyers absorbing sellers
+        "close_position",           # −1.88: ATC close near low = distribution; near high = bounce
+        # Context (Vietnam structural — economic meaning preserved)
+        "range_expansion_up",       # −1.27: FOMO-overshoot candle reversal; collinear with dist_ma but orthogonal mechanism
     ],
     REGIME_ID["PANIC_BEAR"]: [
-        # Core exhaustion / capitulation signals
-        "zscore_return_neg",      # oversold extreme — larger magnitude = deeper panic = more bounce
-        "zscore_return_abs",      # event-day magnitude flag: very high = exhaustion imminent
-        "volume_spike",           # abnormal volume → exhaustion signal
-        "panic",                  # composite: down-day + volume spike > 1.5×
-        "limit_down_streak",      # consecutive circuit-breaker down days (Vietnam-specific)
-        "down_vol_pressure",      # selling pressure on down days
-        "rsi_divergence",         # RSI makes higher low while price lower low → bullish divergence
-        "gap",                    # large negative gap = continuation; small = potential exhaustion
-        # Obs 2: limit queue dynamics
-        "limit_down_conviction",  # limit-down + high volume = strong trapped-seller queue
-        # Obs 3: T+2 settlement cascade
-        "t2_cascade",             # 3-day cumulative drop > 8% × volume: all cohorts stuck
-        # Obs 4: smart money proxy
-        "smart_money_down",       # down-day + high volume = distribution by institutions
-        # Obs 5: range expansion — down-day only (panic continuation context)
-        "range_expansion_down",   # wide range on a down day = forced liquidation still active → continuation
-        "range_expansion_up",     # wide range on up day = FOMO overshoot → reversal (universal signal)
-        # Obs 6: margin cascade
-        "margin_cascade_duration",# how many of last 3 days were extreme-down (>2 std)
-        # Obs 1: late seller exhaustion — selling on top of existing cascade → capitulation bottom
-        "seller_exhaustion_late", # high when: down day + vol spike + cascade already underway (2-3 extreme days)
-        # Universal
-        "conviction_close",       # very low = max fear; turning up = potential reversal
+        # Core — joint FM dominant signals in PB (|t| ≥ 3.0)
+        "smart_money_up",           # +9.26: institutions buying into panic = strongest bottom signal
+        "range_expansion_up",       # −6.52: wide up-candle in panic = exhaustion reversal (universal)
+        "dist_ma",                  # −5.55: price far below MA in panic = mean-reversion setup
+        "gap",                      # +3.69: gap-down magnitude locates cascade severity
+        # Supporting (1.0 ≤ |t| < 3.0)
+        "delta_dist",               # +2.23: MA velocity — acceleration into panic trough
+        "seller_exhaustion_fresh",  # +1.88: isolated spike without cascade continuation → bounce
+        # Context (Vietnam structural — low marginal t but distinct economic mechanism)
+        "limit_down_conviction",    # −1.28: limit-down + high vol = trapped-seller queue overhang
     ],
     REGIME_ID["QUIET_BULL"]: [
-        # Core trend-following / accumulation signals
-        "delta_dist",             # velocity of price vs MA5 (fires before crossover)
-        "macd_hist_slope",        # MACD histogram turning point detector
-        "delta_macd_combined",    # delta_dist × macd_hist_slope: confluence of both
-        "mom_5",                  # 5-day momentum
-        "vol_accel",              # volume accelerating: quiet accumulation before breakout
-        "rsi_14",                 # RSI confirms trend strength in steady uptrend
-        # Obs 4: foreign / smart money accumulation
-        "smart_money_up",         # up-day + high volume = institutions absorbing retail selling
-        "volume_price_divergence",# price ↑ but volume fading → rally losing fuel, likely fade
-        # Obs 5: ATC distribution detection
-        "intraday_distribution",  # up day + closed near low = institutional ATC selling into rally
-        # Obs 2: limit-open reversal (caution signal)
-        "limit_open_reversal",    # hit limit-up yesterday + closed near low today = distribution
-        # Universal mean-reversion
-        "range_expansion_up",     # wide range on up day = FOMO overshoot → reversal (universal signal)
-        "conviction_close",       # high = accumulation with volume; rising trend is healthy
+        # Core signals (|t| ≥ 2.5 in joint FM)
+        "smart_money_up",           # +11.97: institutional absorption = trend health indicator
+        "dist_ma",                  # −6.03: universal; extended above MA in quiet bull → mean-reversion
+        "range_expansion_up",       # −4.45: FOMO overshoot in uptrend → next-day fade (universal)
+        "zscore_return_neg",        # −3.28: extreme down-day in bull = overreaction → fast bounce
+        # Supporting (1.5 ≤ |t| < 2.5)
+        "delta_dist",               # +1.88: MA velocity; confirms accumulation momentum
+        # Context
+        "conviction_close",         # −0.86: negative role — weak close in uptrend = distribution warning
     ],
     REGIME_ID["VOLATILE_BULL"]: [
-        # Core momentum / breakout signals
-        "delta_dist",             # price vs MA velocity
-        "macd_hist_slope",        # momentum inflection detector
-        "gap",                    # overnight gap on breakout days: very informative
-        "vol_accel",              # volume surge: fuel for continuation
-        "z_window",               # 5-day z-score: overbought filter (when very high = caution)
-        "limit_up_streak",        # consecutive limit-up days: Vietnam FOMO momentum burst
-        "zscore_return_pos",      # breakout size — positive tail only; large = strong move
-        "zscore_return_abs",      # event-day flag: very large absolute move = possible exhaustion top
-        # Obs 2: limit queue dynamics
-        "limit_up_conviction",    # limit-up + high volume = strong unmatched-buyer queue
-        # Obs 5: range expansion — up-day only (overbought/exhaustion context)
-        "range_expansion_up",     # wide range on up day = FOMO overshoot → reversal (universal signal)
-        # Obs 4: smart money
-        "smart_money_up",         # up-day + high volume = institutional buying into breakout
-        # Obs 1: distribution pressure as OVERBOUGHT filter (up-day split)
-        "distribution_pressure",  # up day + closed near low + vol spike = distribution top forming
-        # Universal
-        "conviction_close",       # high = buyers held ground: continuation likely
+        # Core signals (|t| ≥ 2.5 in joint FM)
+        "smart_money_up",           # +10.81: institutional participation confirms momentum durability
+        "dist_ma",                  # −5.54: universal reversion; large MA-extension = fade even in VB
+        "range_expansion_up",       # −5.01: exhaustion guard; FOMO overshoot → reversal (universal)
+        "zscore_return_neg",        # −4.93: extreme neg-z even in VB = sharp reversal signal
+        "delta_dist",               # +3.71: MA velocity separates real breakout from retail-only pump
+        # Supporting (1.0 ≤ |t| < 2.0)
+        "vol_accel",                # −1.32: volume deceleration on up-moves = fuel running out
+        "limit_up_streak",          # −1.33: consecutive limit-up streak (note: negative = exhaustion)
+        # Context
+        "conviction_close",         # +0.69: strong close confirms buyers held ground
     ],
 }
 
