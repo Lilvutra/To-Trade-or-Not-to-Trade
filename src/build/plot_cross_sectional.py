@@ -114,6 +114,7 @@ def get_regime_map() -> pd.Series:
 def run_analysis() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     df, features = load_panel()
 
+    # run fama macbeth regression
     factor_df = run_cross_sectional_regression(
         df, features, use_wls=True, neutralize_industry=False
     )

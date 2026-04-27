@@ -110,25 +110,27 @@ REGIME_NAME = {v: k for k, v in REGIME_ID.items()} # reverse mapping for conveni
 REGIME_FEATURES: dict[int, list[str]] = {
     REGIME_ID["QUIET_BEAR"]: [
         # Core mean-reversion signals
-        "zscore_return",          # how extreme is today's return vs recent vol
+        "zscore_return_neg",      # oversold extreme only (0 on up days) → bounce predictor
         "rsi_divergence",         # price ↑ but RSI ↓ (or vice versa) → reversal setup
         "dist_ma",                # distance from MA5 (oversold when very negative)
         "close_position",         # where close landed in today's high-low range
         "gap",                    # overnight gap: sentiment before MA reacts
         "vol_relative",           # relative vol spike even in quiet regime = warning
-        # Obs 1: retail exhaustion
-        "retail_exhaustion",      # closed near low + high volume = retail panic selling
-        "herd_momentum_10",       # 10-day fraction of up-days: low = bearish consensus building
+        # Obs 1: fresh seller exhaustion — isolated selling, no cascade → bounce signal
+        "seller_exhaustion_fresh",  # high when: down day + closed near low + vol spike + NO prior cascade
+        "herd_momentum_10",         # 10-day fraction of up-days: low = bearish consensus building
         # Obs 3: T+2 settlement
         "t2_forced_selling",      # sharp drop 2 days ago × current volume spike
         # Obs 5: ATC distortion
         "intraday_distribution",  # up day but closed near low = institutional ATC selling
-        # Universal
+        # Universal mean-reversion
+        "range_expansion_up",     # wide range on up day = FOMO overshoot → reversal (universal signal)
         "conviction_close",       # low value confirms weakness; reversal if it turns up
     ],
     REGIME_ID["PANIC_BEAR"]: [
         # Core exhaustion / capitulation signals
-        "zscore_return",          # magnitude of the panic move
+        "zscore_return_neg",      # oversold extreme — larger magnitude = deeper panic = more bounce
+        "zscore_return_abs",      # event-day magnitude flag: very high = exhaustion imminent
         "volume_spike",           # abnormal volume → exhaustion signal
         "panic",                  # composite: down-day + volume spike > 1.5×
         "limit_down_streak",      # consecutive circuit-breaker down days (Vietnam-specific)
@@ -141,12 +143,13 @@ REGIME_FEATURES: dict[int, list[str]] = {
         "t2_cascade",             # 3-day cumulative drop > 8% × volume: all cohorts stuck
         # Obs 4: smart money proxy
         "smart_money_down",       # down-day + high volume = distribution by institutions
-        # Obs 5: range expansion
-        "range_expansion",        # panic days have wider ranges than normal
+        # Obs 5: range expansion — down-day only (panic continuation context)
+        "range_expansion_down",   # wide range on a down day = forced liquidation still active → continuation
+        "range_expansion_up",     # wide range on up day = FOMO overshoot → reversal (universal signal)
         # Obs 6: margin cascade
         "margin_cascade_duration",# how many of last 3 days were extreme-down (>2 std)
-        # Obs 1: retail exhaustion as capitulation detector
-        "retail_exhaustion",      # high value = sellers dominated → potential exhaustion bottom
+        # Obs 1: late seller exhaustion — selling on top of existing cascade → capitulation bottom
+        "seller_exhaustion_late", # high when: down day + vol spike + cascade already underway (2-3 extreme days)
         # Universal
         "conviction_close",       # very low = max fear; turning up = potential reversal
     ],
@@ -165,7 +168,8 @@ REGIME_FEATURES: dict[int, list[str]] = {
         "intraday_distribution",  # up day + closed near low = institutional ATC selling into rally
         # Obs 2: limit-open reversal (caution signal)
         "limit_open_reversal",    # hit limit-up yesterday + closed near low today = distribution
-        # Universal
+        # Universal mean-reversion
+        "range_expansion_up",     # wide range on up day = FOMO overshoot → reversal (universal signal)
         "conviction_close",       # high = accumulation with volume; rising trend is healthy
     ],
     REGIME_ID["VOLATILE_BULL"]: [
@@ -176,15 +180,16 @@ REGIME_FEATURES: dict[int, list[str]] = {
         "vol_accel",              # volume surge: fuel for continuation
         "z_window",               # 5-day z-score: overbought filter (when very high = caution)
         "limit_up_streak",        # consecutive limit-up days: Vietnam FOMO momentum burst
-        "zscore_return",          # size of today's move vs recent vol
+        "zscore_return_pos",      # breakout size — positive tail only; large = strong move
+        "zscore_return_abs",      # event-day flag: very large absolute move = possible exhaustion top
         # Obs 2: limit queue dynamics
         "limit_up_conviction",    # limit-up + high volume = strong unmatched-buyer queue
-        # Obs 5: range expansion
-        "range_expansion",        # breakout days have wider ranges than recent average
+        # Obs 5: range expansion — up-day only (overbought/exhaustion context)
+        "range_expansion_up",     # wide range on up day = FOMO overshoot → reversal (universal signal)
         # Obs 4: smart money
         "smart_money_up",         # up-day + high volume = institutional buying into breakout
-        # Obs 1: retail exhaustion as OVERBOUGHT filter
-        "retail_exhaustion",      # closed near low + vol spike = distribution top forming
+        # Obs 1: distribution pressure as OVERBOUGHT filter (up-day split)
+        "distribution_pressure",  # up day + closed near low + vol spike = distribution top forming
         # Universal
         "conviction_close",       # high = buyers held ground: continuation likely
     ],
@@ -534,8 +539,26 @@ def _build_shared_base(
     g["_vol_spike"]  = volume / (g["_vol_mean20"] + EPS)
 
     # ── Volatility ────────────────────────────────────────────────────────────
-    g["_vol20_std"]  = g["_ret"].rolling(20).std() # 
+    g["_vol20_std"]  = g["_ret"].rolling(20).std()
     g["_zscore_ret"] = g["_ret"] / (g["_vol20_std"] + EPS)
+
+    # ── zscore_return signed splits ───────────────────────────────────────────
+    # Splitting the direction-agnostic zscore into three components so linear
+    # models can assign different coefficients to each tail and to magnitude.
+    
+    # zscore_return_neg: oversold detector — 0 on neutral/up days, negative on
+    #   extreme down days. Larger magnitude = more extreme sell-off.
+    #   Use in QB/PB: high absolute value predicts mean-reversion bounce.
+    #
+    # zscore_return_pos: overbought / breakout size — 0 on neutral/down days,
+    #   positive on extreme up days. Larger = stronger breakout move.
+    #   Use in VB: confirms breakout when large, warns of exhaustion when very large.
+    
+    # zscore_return_abs: event-day flag — magnitude regardless of direction.
+    #   Use as a volatility / regime-transition flag across all regimes.
+    g["zscore_return_neg"] = g["_zscore_ret"].clip(upper=0)
+    g["zscore_return_pos"] = g["_zscore_ret"].clip(lower=0)
+    g["zscore_return_abs"] = g["_zscore_ret"].abs()
 
     # ── Intraday position ─────────────────────────────────────────────────────
     # 1.0 = closed at session high, 0.0 = closed at session low
@@ -583,13 +606,60 @@ def _build_shared_base(
     # High → buyers held their ground with conviction throughout the session.
     # Low  → sellers dominated; price closed near the low despite high volume.
     # This is the closest OHLCV proxy to order-flow data.
-    g["conviction_close"] = g["_close_pos"] * np.log1p(g["_vol_spike"]) 
+    g["conviction_close"] = g["_close_pos"] * np.log1p(g["_vol_spike"])
 
-    # retail_exhaustion (Obs 1)
-    # Closed near the LOW with elevated volume = retail panic / capitulation.
-    # In bear regimes: high value is a sell signal or capitulation bottom.
-    # In bull regimes: high value warns of distribution (sellers taking over).
+    # retail_exhaustion (Obs 1) — kept for backward compatibility
+    # Original composite: closed near low + high volume, regardless of day direction.
     g["retail_exhaustion"] = (1.0 - g["_close_pos"]) * g["_vol_spike"]
+
+    # ── Cascade duration (shared internal — reused by panic bear builder) ────────
+    # How many of the last 3 sessions had returns below −2 std?
+    # 0 = no recent extreme selling, 3 = full cascade (all 3 days extreme).
+    _extreme_down        = (g["_zscore_ret"] < -2.0).astype(float)
+    g["_cascade_dur"]    = _extreme_down.rolling(3, min_periods=1).sum()   # range [0, 3]
+    _cascade_norm        = g["_cascade_dur"] / 3.0                          # normalised [0, 1]
+
+    # ── range_expansion splits ────────────────────────────────────────────────
+    # Base: daily high-low range relative to 20-day average range.
+    _range_expansion = g["_daily_range"] / (g["_range_mean20"] + EPS)
+
+    # Bearish expansion — wide range on a down day = panic / forced liquidation still active.
+    # FM result: strong CONTINUATION signal in PANIC_BEAR (t = −3.52).
+    # High value means selling is ongoing, not exhausted → expect more downside.
+    # Use in PANIC_BEAR only.
+    g["range_expansion_down"] = (g["_ret"] < 0).astype(float) * _range_expansion
+
+    # Bullish expansion — wide range on an up day = retail FOMO overshoot → mean-reversion.
+    # FM result: universal mean-reversion signal across ALL regimes (t ≈ −3.9, no sign flips).
+    # Wide up-day range in Vietnam reflects retail pile-in, not institutional conviction.
+    # Moved to shared base so all regime models can use it.
+    g["range_expansion_up"] = (g["_ret"] > 0).astype(float) * _range_expansion
+
+    # seller_exhaustion — down-day only split of retail_exhaustion
+    # Fires on: down day + closed near low + high volume = panic selling into close.
+    _down_day = (g["_ret"] < 0).astype(float)
+    g["seller_exhaustion"] = _down_day * (1.0 - g["_close_pos"]) * g["_vol_spike"]
+
+    # seller_exhaustion_fresh — isolated selling with no cascade context
+    # cascade_norm ≈ 0  → weight ≈ 1.0  (this is an unusual, lone selling event)
+    # cascade_norm ≈ 1  → weight ≈ 0.0  (already in a cascade, signal muted)
+    # Interpretation: sudden heavy selling in a calm market → sellers exhausted → bounce.
+    # Use in QUIET_BEAR where cascade rarely builds.
+    g["seller_exhaustion_fresh"] = g["seller_exhaustion"] * (1.0 - _cascade_norm)
+
+    # seller_exhaustion_late — selling pressure on top of an existing cascade
+    # cascade_norm ≈ 0  → weight ≈ 0.0  (no cascade yet, not relevant)
+    # cascade_norm ≈ 1  → weight ≈ 1.0  (3 consecutive extreme days → forced liq. exhausted)
+    # Interpretation: continued panic selling after a multi-day cascade → capitulation bottom.
+    # Use in PANIC_BEAR where cascade duration is the distinguishing context.
+    g["seller_exhaustion_late"] = g["seller_exhaustion"] * _cascade_norm
+
+    # distribution_pressure — up-day only split of retail_exhaustion
+    # Fires on: up day + closed near low + high volume = institutions sold into rally at ATC.
+    # In bull regimes this warns of a distribution top forming.
+    # Predicted direction: bearish (high value → next-day weakness likely).
+    _up_day = (g["_ret"] > 0).astype(float)
+    g["distribution_pressure"] = _up_day * (1.0 - g["_close_pos"]) * g["_vol_spike"]
 
     return g
 
@@ -614,7 +684,6 @@ def _build_quiet_bear_features(g: pd.DataFrame) -> pd.DataFrame:
 
     # ── Core mean-reversion signals ───────────────────────────────────────────
     g["dist_ma"]        = (close - g["_ma5"]) / (g["_ma5"] + EPS)
-    g["zscore_return"]  = g["_zscore_ret"] # 
     g["rsi_divergence"] = g["_rsi_div"]
     g["close_position"] = g["_close_pos"]
     g["gap"]            = g["_gap"]
@@ -666,7 +735,6 @@ def _build_panic_bear_features(g: pd.DataFrame) -> pd.DataFrame:
     g["limit_down_streak"]  = g["_limit_down_streak"]
     g["down_vol_pressure"]  = (g["_log_ret"] < 0).astype(int) * g["_vol_chg"]
     g["rsi_divergence"]     = g["_rsi_div"]
-    g["zscore_return"]      = g["_zscore_ret"]
     g["gap"]                = g["_gap"]
 
     # ── Obs 2: limit-down conviction ──────────────────────────────────────────
@@ -687,16 +755,10 @@ def _build_panic_bear_features(g: pd.DataFrame) -> pd.DataFrame:
     # In a panic regime this is likely institutions/foreigners exiting into retail panic.
     g["smart_money_down"] = (g["_ret"] < 0).astype(int) * g["_vol_spike"]
 
-    # ── Obs 5: range expansion ────────────────────────────────────────────────
-    # Panic sessions have high-low ranges far above recent average.
-    # Very high range_expansion = maximum fear = potential exhaustion point.
-    g["range_expansion"] = g["_daily_range"] / (g["_range_mean20"] + EPS)
-
     # ── Obs 6: margin cascade duration ───────────────────────────────────────
-    # How many of the last 3 sessions had returns more extreme than −2 std?
-    # Cascade of 3 = forced liquidation likely exhausted; bounce imminent.
-    extreme_down                   = (g["_zscore_ret"] < -2.0).astype(int)
-    g["margin_cascade_duration"]   = extreme_down.rolling(3, min_periods=1).sum()
+    # Reuse _cascade_dur computed in shared base (same formula, avoids duplication).
+    # Value of 3 = forced liquidation likely exhausted; bounce imminent.
+    g["margin_cascade_duration"] = g["_cascade_dur"]
 
     # conviction_close and retail_exhaustion come from shared base
 
@@ -786,11 +848,6 @@ def _build_volatile_bull_features(g: pd.DataFrame) -> pd.DataFrame:
     # who cannot exit — they will push price higher at the next open.
     g["limit_up_conviction"] = g["_limit_up"] * g["_vol_spike"]
 
-    # ── Obs 5: range expansion ────────────────────────────────────────────────
-    # Breakout days tend to have high-low ranges well above recent average.
-    # Large range_expansion + positive return = real breakout (not a fake).
-    # Small range despite high volume = absorption at resistance → be cautious.
-    g["range_expansion"] = g["_daily_range"] / (g["_range_mean20"] + EPS)
 
     # ── Obs 4: smart money buying ─────────────────────────────────────────────
     # Up day + elevated volume = institutions/foreigners participating in the move.

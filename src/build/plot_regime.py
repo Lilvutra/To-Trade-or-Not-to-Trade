@@ -18,15 +18,15 @@ Two functions:
 
     Also prints agreement rate and a per-regime breakdown.
 
-Vietnam market conventions used
+Vietnam market self-defined conventions used
 --------------------------------
   Window    : 20 trading days ≈ 1 calendar month
   Thresholds: bull_thresh = bear_thresh = 0.04  (4%)
   Regimes:
-    return >= +4%        → VOLATILE_BULL  (3)
-     0% ≤ return < +4%  → QUIET_BULL     (2)
-    -4% < return < 0%   → QUIET_BEAR     (0)
-    return ≤ -4%        → PANIC_BEAR     (1)
+    return >= +6%        → VOLATILE_BULL  (3)
+     0% ≤ return < +6%  → QUIET_BULL     (2)
+    -5% < return < 0%   → QUIET_BEAR     (0)
+    return ≤ -5%        → PANIC_BEAR     (1)
 
   These thresholds are calibrated to Vietnam's typical monthly
   volatility.  A 4% move in a month is meaningful for HOSE stocks;
