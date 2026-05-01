@@ -36,6 +36,8 @@ from run_cross_sectional import (
     run_cross_sectional_regression,
     fama_macbeth_summary,
     regime_fama_macbeth,
+    univariate_fama_macbeth,
+    regime_fm_proper,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -111,10 +113,10 @@ def get_regime_map() -> pd.Series:
     return vcb_feat.set_index("date")["regime"].rename("regime")
 
 
-def run_analysis() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+def run_analysis() -> tuple[pd.DataFrame, pd.DataFrame, dict, pd.DataFrame, dict]:
     df, features = load_panel()
 
-    # run fama macbeth regression
+    # Joint cross-sectional regression — all features, all stocks, all dates
     factor_df = run_cross_sectional_regression(
         df, features, use_wls=True, neutralize_industry=False
     )
@@ -122,11 +124,19 @@ def run_analysis() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
 
     full_summary = fama_macbeth_summary(factor_df)
 
-    regime_map              = get_regime_map()
-    factor_df_with_regime   = factor_df.join(regime_map)
-    regime_results          = regime_fama_macbeth(factor_df_with_regime)
+    regime_map            = get_regime_map()
+    factor_df_with_regime = factor_df.join(regime_map)
+    regime_results        = regime_fama_macbeth(factor_df_with_regime)
 
-    return factor_df, full_summary, regime_results
+    # Univariate FM — each feature alone, all stocks, all dates
+    print("\nRunning univariate FM…")
+    uni_summary = univariate_fama_macbeth(df, features)
+
+    # Regime-proper FM — separate joint regression per regime, regime's features only
+    print("\nRunning regime-proper FM…")
+    regime_proper_results = regime_fm_proper(df, regime_map)
+
+    return factor_df, full_summary, regime_results, uni_summary, regime_proper_results
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -365,7 +375,134 @@ def plot_sharpe(full_summary: pd.DataFrame, save_path: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. Console summary
+# 7. Plot 5 — Univariate FM t-stats
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_univariate_tstats(uni_summary: pd.DataFrame, save_path: str) -> None:
+    """
+    Standalone signal strength: each feature regressed alone (no multicollinearity).
+    Same bar chart format as plot_tstats for direct comparison.
+    """
+    df = uni_summary.drop(index="const", errors="ignore").copy()
+    df = df.sort_values("t_stat")
+
+    colors = []
+    for t in df["t_stat"]:
+        if t >= TSTAT_THRESH:    colors.append("#15803d")
+        elif t > 0:              colors.append("#86efac")
+        elif t > -TSTAT_THRESH:  colors.append("#fca5a5")
+        else:                    colors.append("#991b1b")
+
+    fig, ax = plt.subplots(figsize=(10, max(5, len(df) * 0.35)))
+    bars = ax.barh(df.index, df["t_stat"], color=colors, edgecolor="white", linewidth=0.4)
+
+    ax.axvline( TSTAT_THRESH, color="#475569", linestyle="--", linewidth=0.9, label=f"|t|={TSTAT_THRESH}")
+    ax.axvline(-TSTAT_THRESH, color="#475569", linestyle="--", linewidth=0.9)
+    ax.axvline(0, color="#1e293b", linewidth=0.7)
+
+    for bar, t in zip(bars, df["t_stat"]):
+        n = int(df.loc[df["t_stat"] == t, "n_dates"].iloc[0]) if "n_dates" in df.columns else ""
+        label = f"{t:.2f}  (n={n})" if n else f"{t:.2f}"
+        offset = 0.1 if t >= 0 else -0.1
+        ax.text(t + offset, bar.get_y() + bar.get_height() / 2,
+                label, va="center", ha="left" if t >= 0 else "right",
+                fontsize=7.5, color="#1e293b")
+
+    ax.set_xlabel("Newey-West t-statistic", fontsize=10)
+    ax.set_title("Univariate FM: Standalone Signal Strength per Feature\n"
+                 "(each feature regressed alone — no multicollinearity)",
+                 fontsize=11, fontweight="bold")
+    ax.legend(fontsize=8)
+    ax.grid(axis="x", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved → {save_path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Plot 6 — Regime-proper FM heatmap
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_regime_proper_heatmap(regime_proper_results: dict, save_path: str) -> None:
+    """
+    Heatmap of regime-proper FM t-stats.
+    Each regime's row shows only its own feature subset — the correct way to
+    evaluate features as the training pipeline will use them.
+    NaN cells = feature not used in that regime.
+    """
+    # Collect all features across all regimes, ordered by regime then feature
+    all_features: list = []
+    seen: set = set()
+    for rid in sorted(regime_proper_results.keys()):
+        feats = REGIME_FEATURES.get(rid, [])
+        for f in feats:
+            if f not in seen:
+                seen.add(f); all_features.append(f)
+
+    regime_ids   = sorted(regime_proper_results.keys())
+    regime_names = [REGIME_NAME.get(r, str(r)) for r in regime_ids]
+
+    # Build matrix — NaN where a feature is not in the regime's subset
+    matrix = pd.DataFrame(np.nan, index=regime_names, columns=all_features)
+    for rid in regime_ids:
+        name  = REGIME_NAME.get(rid, str(rid))
+        res   = regime_proper_results[rid].drop(index="const", errors="ignore")
+        feats = REGIME_FEATURES.get(rid, [])
+        for feat in feats:
+            if feat in res.index:
+                matrix.loc[name, feat] = res.loc[feat, "t_stat"]
+
+    # Sort columns by max |t| across regimes
+    col_order = matrix.abs().max(axis=0).sort_values(ascending=False).index.tolist()
+    matrix = matrix[col_order]
+
+    fig, ax = plt.subplots(figsize=(max(14, len(col_order) * 0.65), 4.5))
+
+    norm = mcolors.TwoSlopeNorm(vmin=-6, vcenter=0, vmax=6)
+    data = matrix.values.astype(float)
+    im   = ax.imshow(data, cmap="RdYlGn", norm=norm, aspect="auto")
+
+    ax.set_xticks(range(len(col_order)))
+    ax.set_xticklabels(col_order, rotation=55, ha="right", fontsize=7.5)
+    ax.set_yticks(range(len(regime_names)))
+    ax.set_yticklabels(regime_names, fontsize=9)
+
+    for i, rname in enumerate(regime_names):
+        for j, feat in enumerate(col_order):
+            val = matrix.loc[rname, feat]
+            if pd.isna(val):
+                # Grey out unused cells
+                ax.add_patch(plt.Rectangle(
+                    (j - 0.5, i - 0.5), 1.0, 1.0,
+                    color="#e2e8f0", zorder=0
+                ))
+                ax.text(j, i, "—", ha="center", va="center", fontsize=7, color="#94a3b8")
+                continue
+            text_color = "white" if abs(val) > 3.5 else "#1e293b"
+            ax.text(j, i, f"{val:.1f}", ha="center", va="center",
+                    fontsize=7.5, color=text_color, fontweight="bold" if abs(val) >= TSTAT_THRESH else "normal")
+            if abs(val) >= TSTAT_THRESH:
+                ax.add_patch(plt.Rectangle(
+                    (j - 0.48, i - 0.48), 0.96, 0.96,
+                    fill=False, edgecolor="black", linewidth=1.4
+                ))
+
+    plt.colorbar(im, ax=ax, fraction=0.015, pad=0.01,
+                 label=f"NW t-statistic  (boxed = |t| ≥ {TSTAT_THRESH}, grey = not used in regime)")
+    ax.set_title(
+        "Regime-Proper FM: Per-Regime Joint Regression (Regime's Features Only)\n"
+        "(mirrors training pipeline — one model per regime, correct feature subset)",
+        fontsize=10, fontweight="bold", pad=10,
+    )
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved → {save_path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. Console summary
 # ─────────────────────────────────────────────────────────────────────────────
 
 def print_summary(full_summary: pd.DataFrame, regime_results: dict) -> None:
@@ -397,7 +534,7 @@ def print_summary(full_summary: pd.DataFrame, regime_results: dict) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    factor_df, full_summary, regime_results = run_analysis()
+    factor_df, full_summary, regime_results, uni_summary, regime_proper_results = run_analysis()
 
     save_results(factor_df, full_summary, regime_results)
     print_summary(full_summary, regime_results)
@@ -418,6 +555,14 @@ def main() -> None:
     plot_sharpe(
         full_summary,
         save_path=os.path.join(OUT_DIR, "plot_sharpe.png"),
+    )
+    plot_univariate_tstats(
+        uni_summary,
+        save_path=os.path.join(OUT_DIR, "plot_univariate_tstats.png"),
+    )
+    plot_regime_proper_heatmap(
+        regime_proper_results,
+        save_path=os.path.join(OUT_DIR, "plot_regime_proper_heatmap.png"),
     )
 
     print(f"\nAll outputs written to {OUT_DIR}/")

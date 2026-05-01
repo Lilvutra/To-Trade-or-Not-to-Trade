@@ -105,7 +105,7 @@ from get_regime import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 DATA_PATH   = "./data/data-vn-20230228/stock-historical-data/VCB-VNINDEX-History.csv"
-HORIZON     = 10        # days forward for return label
+HORIZON     = 5        # days forward for return label
 SEQ_LEN     = 20        # LSTM look-back window
 N_EXPERTS   = 4         # one per regime: QUIET_BEAR, PANIC_BEAR, QUIET_BULL, VOLATILE_BULL
 N_REGIMES   = 4

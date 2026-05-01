@@ -171,11 +171,15 @@ def run_cross_sectional_regression(
         # WLS: weight each stock by 1/volatility so that low-volatility stocks
         # (whose returns are more precisely measured) influence the coefficients more.
         # This reduces noise from highly volatile small-caps dominating the estimate.
-        if use_wls:
-            weights = 1.0 / (group["volatility"] + 1e-6)
-            model = sm.WLS(y, X, weights=weights).fit()
-        else:
-            model = sm.OLS(y, X).fit()
+        try:
+            if use_wls:
+                weights = 1.0 / (group["volatility"] + 1e-6)
+                model = sm.WLS(y, X, weights=weights).fit()
+            else:
+                model = sm.OLS(y, X).fit()
+        except Exception:
+            # Near-singular design matrix (e.g. collinear features on a thin cross-section)
+            continue
 
         # model.params is a Series of {feature_name: coefficient}.
         # Each coefficient is the "factor return" — how much a one-standard-deviation
@@ -257,6 +261,121 @@ def fama_macbeth_summary(factor_df):
 
     # Sort by absolute t-stat so the most statistically significant factors appear first.
     return summary.sort_values("t_stat", key=abs, ascending=False)
+
+
+def univariate_fama_macbeth(df, features, return_col="return_1", min_obs=30):
+    """
+    Validate each feature independently: one cross-sectional regression per
+    feature per date, across all stocks and all time periods.
+
+    This gives the raw standalone predictive power of each feature —
+    no multicollinearity, no other features competing. The correct test for
+    evaluating whether a feature idea works at all.
+
+    Returns:
+        DataFrame with columns [mean, std, se_nw, t_stat] sorted by |t_stat|,
+        one row per feature.
+    """
+    feature_series: dict[str, list] = {f: [] for f in features}
+
+    for date, group in df.groupby("date"):
+        group = group.dropna(subset=[return_col])
+        y = group[return_col].values
+
+        for feat in features:
+            if feat not in group.columns:
+                continue
+            sub = group[[feat]].copy()
+            sub = sub.join(group[[return_col]])
+            sub = sub.dropna()
+            finite_mask = np.isfinite(sub.values).all(axis=1)
+            sub = sub[finite_mask]
+            if len(sub) < min_obs:
+                continue
+
+            x = sub[feat].values.astype(float)
+            std = x.std()
+            if std < 1e-9:
+                continue
+            x = (x - x.mean()) / std
+
+            # OLS via normal equations: β = cov(x, y) / var(x)
+            y_sub = sub[return_col].values
+            cov_xy = np.mean(x * y_sub)
+            var_x  = np.mean(x ** 2)
+            feature_series[feat].append(cov_xy / (var_x + 1e-9))
+
+    rows = {}
+    for feat, coeffs in feature_series.items():
+        if len(coeffs) < 4:
+            continue
+        fr = np.array(coeffs)
+        n  = len(fr)
+        lags = max(1, int(n ** 0.25))
+        model = sm.OLS(fr, np.ones(n)).fit(cov_type="HAC", cov_kwds={"maxlags": lags})
+        rows[feat] = {
+            "mean":   fr.mean(),
+            "std":    fr.std(),
+            "se_nw":  model.bse[0],
+            "t_stat": fr.mean() / (model.bse[0] + 1e-9),
+            "n_dates": n,
+        }
+
+    return pd.DataFrame(rows).T.sort_values("t_stat", key=abs, ascending=False)
+
+
+def regime_fm_proper(df, regime_map, return_col="return_1", min_obs=30, min_periods=20):
+    """
+    Regime-conditional FM the correct way:
+      - Filter panel rows to the regime's dates
+      - Use only that regime's feature subset
+      - Run a fresh joint cross-sectional regression on the filtered panel
+
+    This mirrors exactly how the training pipeline uses features: one model
+    per regime, only that regime's features, only that regime's rows.
+
+    Args:
+        df         : full panel with all feature columns and return_col.
+        regime_map : Series indexed by date → regime int (e.g. from VCB proxy).
+
+    Returns:
+        dict mapping regime_id → fama_macbeth_summary DataFrame.
+    """
+    from get_regime import REGIME_FEATURES, REGIME_NAME
+
+    df = df.copy()
+    df["_regime"] = df["date"].map(regime_map)
+
+    results = {}
+
+    for regime_id, feat_list in REGIME_FEATURES.items():
+        feats = [f for f in feat_list if f in df.columns]
+        if not feats:
+            continue
+
+        # Rows where the market was in this regime
+        regime_df = df[df["_regime"] == regime_id].copy()
+        if regime_df["date"].nunique() < min_periods:
+            continue
+
+        # Joint cross-sectional regression with this regime's feature subset only
+        factor_df = run_cross_sectional_regression(
+            regime_df, feats,
+            return_col=return_col,
+            min_obs=min_obs,
+            use_wls=True,
+        )
+
+        label = REGIME_NAME.get(regime_id, str(regime_id))
+        print(f"\n{'─'*60}")
+        print(f"  REGIME {regime_id}: {label}  ({len(feats)} features, "
+              f"{factor_df.shape[0]} dates)")
+        print(f"{'─'*60}")
+        summary = fama_macbeth_summary(factor_df)
+        print(summary[["mean", "std", "se_nw", "t_stat"]].to_string())
+        results[regime_id] = summary
+
+    return results
 
 
 def regime_fama_macbeth(factor_df, min_periods=20):
@@ -391,3 +510,22 @@ if __name__ == "__main__":
         label = REGIME_NAME.get(regime_id, regime_id)
         print(f"\n=== Regime {regime_id}: {label} ===")
         print(result.to_string())
+
+    # ------------------------------------------------------------------
+    # 6. Univariate Fama-MacBeth — each feature alone, all stocks, all time
+    #    Measures raw standalone predictive power with no multicollinearity.
+    # ------------------------------------------------------------------
+    print("\n\n" + "═"*60)
+    print("  UNIVARIATE FM — standalone signal strength per feature")
+    print("═"*60)
+    uni = univariate_fama_macbeth(df, features)
+    print(uni[["mean", "t_stat", "n_dates"]].to_string())
+
+    # ------------------------------------------------------------------
+    # 7. Regime-proper FM — separate regression per regime, regime's features only
+    #    Mirrors training pipeline: one model per regime, correct feature subset.
+    # ------------------------------------------------------------------
+    print("\n\n" + "═"*60)
+    print("  REGIME-PROPER FM — per-regime joint regression, correct features")
+    print("═"*60)
+    regime_fm_proper(df, regime_map, return_col="return_1")

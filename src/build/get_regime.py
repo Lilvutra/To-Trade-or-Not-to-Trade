@@ -105,33 +105,30 @@ REGIME_ID = {
 
 REGIME_NAME = {v: k for k, v in REGIME_ID.items()} # reverse mapping for convenience
 
-# Feature columns active for each regime.
+# Feature columns active for each regime
 # The training pipeline should slice df by regime, then use only these columns.
 REGIME_FEATURES: dict[int, list[str]] = {
     REGIME_ID["QUIET_BEAR"]: [
-        # Core mean-reversion (|t| ≥ 2.5 in joint FM)
-        "dist_ma",                  # −4.62: primary MA-reversion anchor; price below MA5 → snap-back
-        "gap",                      # +3.33: gap-down = overnight forced selling exhaustion
-        "delta_dist",               # +2.96: MA velocity (significant even in bear — bounce momentum)
-        "macd_hist_slope",          # −2.85: MACD turning negative in bear = trend confirmation
-        "delta_macd_combined",      # +2.55: confluence of both momentum signals
-        # Supporting (1.5 ≤ |t| < 2.5)
-        "conviction_close",         # +1.90: order-flow proxy; rising = buyers absorbing sellers
-        "close_position",           # −1.88: ATC close near low = distribution; near high = bounce
-        # Context (Vietnam structural — economic meaning preserved)
-        "range_expansion_up",       # −1.27: FOMO-overshoot candle reversal; collinear with dist_ma but orthogonal mechanism
+        # Core 
+        "delta_dist",               # +8.1: MA velocity — positive = bounce momentum building
+        "gap_down",                 # +3.26: gap-down only; cascade continuation signal
+        # Supporting (|t| < 2 but directionally sound)
+        "vol_accel",                # −1.76: volume deceleration = selling pressure fading
+        "dist_ma",                  # +1.49: price below MA5 → snap-back predictor
+        "seller_exhaustion_fresh",  # +1.45: isolated spike without cascade → near-term bounce
+        "oversold_stable",          # +0.79: oversold composite gated by panic/cascade risk
     ],
     REGIME_ID["PANIC_BEAR"]: [
         # Core — joint FM dominant signals in PB (|t| ≥ 3.0)
         "smart_money_up",           # +9.26: institutions buying into panic = strongest bottom signal
-        "range_expansion_up",       # −6.52: wide up-candle in panic = exhaustion reversal (universal)
-        "dist_ma",                  # −5.55: price far below MA in panic = mean-reversion setup
-        "gap",                      # +3.69: gap-down magnitude locates cascade severity
+        "range_expansion_up",       # −6.52: wide up-candle in panic = exhaustion reversal
+        "dist_ma",                  # −5.55: price far below MA = mean-reversion setup
+        "gap_down",                 # gap-down only: cascade severity marker (no gap-up noise in panic)
         # Supporting (1.0 ≤ |t| < 3.0)
         "delta_dist",               # +2.23: MA velocity — acceleration into panic trough
-        "seller_exhaustion_fresh",  # +1.88: isolated spike without cascade continuation → bounce
-        # Context (Vietnam structural — low marginal t but distinct economic mechanism)
-        "limit_down_conviction",    # −1.28: limit-down + high vol = trapped-seller queue overhang
+        "seller_exhaustion_fresh",  # +1.88: isolated spike without cascade → near-term bounce
+        # Context (Vietnam structural)
+        "limit_down_conviction",    # limit-down + high vol = trapped-seller queue overhang
     ],
     REGIME_ID["QUIET_BULL"]: [
         # Core signals (|t| ≥ 2.5 in joint FM)
@@ -141,6 +138,7 @@ REGIME_FEATURES: dict[int, list[str]] = {
         "zscore_return_neg",        # −3.28: extreme down-day in bull = overreaction → fast bounce
         # Supporting (1.5 ≤ |t| < 2.5)
         "delta_dist",               # +1.88: MA velocity; confirms accumulation momentum
+        "macd_hist_slope",          # slope of MACD histogram; rising = momentum building in uptrend
         # Context
         "conviction_close",         # −0.86: negative role — weak close in uptrend = distribution warning
     ],
@@ -176,21 +174,16 @@ REGIME_DESCRIPTIONS: dict[int, dict] = {
         "signal_type": "Mean-reversion",
         "trading_edge": (
             "Oversold extremes are the opportunity. "
-            "When zscore_return and dist_ma reach extreme lows alongside RSI divergence, "
-            "a short-term bounce is likely within 3–5 sessions (Obs 1 — retail herding exhaustion)."
+            "When zscore_return_neg and dist_ma reach extreme lows and seller_exhaustion_fresh spikes without cascade, "
+            "a short-term bounce is likely within 3–5 sessions (delta_dist turning positive is the early confirmation)."
         ),
         "feature_descriptions": {
-            "zscore_return":         "Return normalised by 20-day vol. Extreme negative values signal oversold.",
-            "rsi_divergence":        "Price ↓ but RSI ↑ (bullish divergence) → reversal setup forming.",
-            "dist_ma":               "Distance of close from MA5. Strongly negative = price stretched below trend.",
-            "close_position":        "Where close landed in the day's range (0 = low, 1 = high). Low = sellers in control.",
-            "gap":                   "Overnight gap vs prior close. Negative gaps add to selling pressure before MA reacts.",
-            "vol_relative":          "5-day vol std / MA5. A spike here warns of hidden selling pressure in a quiet regime.",
-            "retail_exhaustion":     "(1 − close_position) × vol_spike. High = retail panic capitulation.",
-            "herd_momentum_10":      "Fraction of up-days in last 10 sessions. Very low → bearish consensus; bounce risk rising.",
-            "t2_forced_selling":     "Sharp drop 2 days ago × current vol spike. T+2 settlement forces today's selling.",
-            "intraday_distribution": "Up day in price but close near low. Institutions used the rally to sell at ATC.",
-            "conviction_close":      "close_position × log(1 + vol_spike). Low = sellers dominated; useful reversal trigger if it turns up.",
+            "delta_dist":               "Day-over-day change in distance from MA5. Turning positive = bounce momentum building before price confirms.",
+            "gap_down":                 "Negative overnight gap only (clipped at 0). Cascade / forced-selling continuation signal; positive β = larger gap-down → bigger snap-back.",
+            "vol_accel":                "Volume acceleration (vol / lagged vol − 1). Negative = selling pressure fading; key signal that the bleed is running out of fuel.",
+            "dist_ma":                  "Distance of close from MA5. Strongly negative = price stretched below trend; snap-back predictor in quiet regimes.",
+            "seller_exhaustion_fresh":  "(1 − close_pos) × vol_spike × (1 − cascade_norm). High isolated selling spike without a cascade context → near-term bounce.",
+            "oversold_stable":          "Composite: oversold strength × (1 − cascade) × (1 − vol_spike regime) × (1 − high down_ratio). Quantifies how oversold the stock is while gating out panic-driven extremes.",
         },
     },
     REGIME_ID["PANIC_BEAR"]: {
@@ -205,24 +198,17 @@ REGIME_DESCRIPTIONS: dict[int, dict] = {
         "signal_type": "Exhaustion / capitulation bottom detection",
         "trading_edge": (
             "Identify when the cascade has run its course. "
-            "margin_cascade_duration ≥ 3 + rsi_divergence + low conviction_close flipping up "
-            "= high-probability capitulation bottom (Obs 6 — margin exhaustion)."
+            "smart_money_up appearing alongside seller_exhaustion_fresh (isolated spike, no ongoing cascade) "
+            "= high-probability capitulation bottom; range_expansion_up confirms institutions stepped in."
         ),
         "feature_descriptions": {
-            "zscore_return":           "Magnitude of today's panic move relative to recent vol.",
-            "volume_spike":            "Vol / 20-day avg vol. Abnormally high volume on down days = exhaustion signal.",
-            "panic":                   "Binary: down day AND vol_spike > 1.5×. Composite panic flag.",
-            "limit_down_streak":       "Consecutive circuit-breaker down days. Vietnam-specific forced-seller queue.",
-            "down_vol_pressure":       "Selling pressure intensity: negative log-return × volume change.",
-            "rsi_divergence":          "RSI makes higher low while price makes lower low → bullish divergence near capitulation.",
-            "gap":                     "Large negative gap = continuation; small gap after panic = potential exhaustion.",
-            "limit_down_conviction":   "limit_down × vol_spike. Large queue of trapped sellers → continuation OR capitulation bottom.",
-            "t2_cascade":              "3-day cumulative drop > 8% × vol spike. All three T+2 buyer cohorts stuck simultaneously.",
-            "smart_money_down":        "Down day + high volume. Institutions/foreigners distributing into retail panic.",
-            "range_expansion":         "Daily range / 20-day avg range. Panic sessions have abnormally wide ranges; very high = fear peak.",
-            "margin_cascade_duration": "Count of extreme-down days (< −2σ) in last 3 sessions. ≥ 3 = forced liquidation likely exhausted.",
-            "retail_exhaustion":       "High value = retail dominated the sell-off → potential capitulation bottom signal.",
-            "conviction_close":        "Very low = maximum fear. Turning up after multi-day panic = reversal trigger.",
+            "smart_money_up":          "Up day + high volume. Institutions / foreigners absorbing panic selling; strongest capitulation bottom signal.",
+            "range_expansion_up":      "Wide up-candle (high daily range) in a panic session = exhaustion reversal; price accepted back above recent lows with volume.",
+            "dist_ma":                 "Distance of close from MA5. Extreme negative = price far below trend; mean-reversion setup after cascade exhaustion.",
+            "gap_down":                "Negative overnight gap only. In panic, measures cascade severity; further gap-down after extreme drops can signal proximity to capitulation.",
+            "delta_dist":              "Day-over-day change in distance from MA5. Turning positive inside a panic = buyers beginning to absorb selling.",
+            "seller_exhaustion_fresh": "(1 − close_pos) × vol_spike × (1 − cascade_norm). Isolated high-volume selling spike not embedded in an ongoing cascade → near-term bounce signal.",
+            "limit_down_conviction":   "limit_down × vol_spike. Large queue of trapped sellers → trapped-seller overhang; continuation risk or capitulation bottom depending on direction of follow-through.",
         },
     },
     REGIME_ID["QUIET_BULL"]: {
@@ -236,21 +222,17 @@ REGIME_DESCRIPTIONS: dict[int, dict] = {
         "signal_type": "Trend-following / early acceleration detection",
         "trading_edge": (
             "Detect early signs of trend acceleration before price breaks away. "
-            "delta_dist turning positive + macd_hist_slope turning up (delta_macd_combined) "
+            "delta_dist turning positive + smart_money_up on pullback days "
             "= momentum inflection before it is visible in price (Obs 4 — smart money accumulation)."
         ),
         "feature_descriptions": {
-            "delta_dist":              "Day-over-day change in distance from MA5. Positive = price accelerating away from trend.",
-            "macd_hist_slope":         "MACD histogram turning point. Upward turn = momentum inflection before price crossover.",
-            "delta_macd_combined":     "delta_dist × macd_hist_slope. Confluence of both signals; strong when both positive.",
-            "mom_5":                   "5-day price momentum. Captures the steady drift characteristic of this regime.",
-            "vol_accel":               "Volume acceleration. Rising vol before price breakout = quiet accumulation phase ending.",
-            "rsi_14":                  "RSI(14) confirms trend health. Sustained 50–70 band = healthy bull; above 70 = extended.",
-            "smart_money_up":          "Up day + vol spike. Institutions absorbing retail selling; persistent = accumulation intact.",
-            "volume_price_divergence": "Price ↑ but volume fading. Rally losing institutional fuel → reduce exposure.",
-            "intraday_distribution":   "Up day but close near low. ATC selling by institutions; repeated = topping pattern forming.",
-            "limit_open_reversal":     "Limit-up yesterday + close near low today. Queued buyers exhausted instantly → distribution top.",
-            "conviction_close":        "High = buyers held ground with volume; confirms trend health. Declining = accumulation fading.",
+            "smart_money_up":      "Up day + high volume. Institutional accumulation on dips; strongest signal of trend health in quiet bull.",
+            "dist_ma":             "Distance of close from MA5. Negative (pullback to MA) = entry point; positive (stretched) = reduce exposure.",
+            "range_expansion_up":  "Wide up-candle relative to 20-day avg range. Confirms genuine institutional buying, not low-volume drift.",
+            "zscore_return_neg":   "Negative-tail z-score of return. Small pullback days (mildly negative) precede best continuation entries; extreme lows are rare here.",
+            "delta_dist":          "Day-over-day change in distance from MA5. Positive = price accelerating away from trend = early momentum inflection.",
+            "macd_hist_slope":     "Day-over-day change in MACD histogram. Rising histogram = bullish momentum building; confirms trend before price crossover is visible.",
+            "conviction_close":    "close_pos × log(1 + vol_spike). High = buyers held the close with volume; confirms accumulation. Declining = distribution beginning.",
         },
     },
     REGIME_ID["VOLATILE_BULL"]: {
@@ -265,22 +247,18 @@ REGIME_DESCRIPTIONS: dict[int, dict] = {
         "signal_type": "Momentum / breakout continuation",
         "trading_edge": (
             "Ride the burst while it has volume fuel; exit when FOMO exhaustion signals appear. "
-            "limit_up_conviction + vol_accel = continuation. "
-            "High retail_exhaustion (closed near low + volume spike) = FOMO top forming (Obs 1 + 2)."
+            "limit_up_streak + vol_accel + smart_money_up = continuation confirmed. "
+            "conviction_close dropping while price still up = distribution beginning (Obs 1 + 2)."
         ),
         "feature_descriptions": {
-            "delta_dist":          "Price vs MA5 velocity. High = price stretching fast above trend = breakout fuel remaining.",
-            "macd_hist_slope":     "MACD histogram acceleration. Upward = momentum still building; flat/down = nearing peak.",
-            "gap":                 "Overnight gap on breakout days. Large positive gap = institutional conviction in the move.",
-            "vol_accel":           "Volume surge. Fuel for continuation; fading vol during limit-up streak = top approaching.",
-            "z_window":            "5-day z-score vs MA5. Very high (> 3) = overbought; caution on new longs.",
-            "limit_up_streak":     "Consecutive limit-up days. Vietnam FOMO burst; longest streaks precede sharp reversals.",
-            "zscore_return":       "Size of today's move vs recent vol. Confirms whether today's candle is genuine breakout.",
-            "limit_up_conviction": "limit_up × vol_spike. Large unmatched-buyer queue → strong statistical continuation next session.",
-            "range_expansion":     "Daily range vs 20-day avg. Wide range + positive return = real breakout; narrow = absorption at resistance.",
-            "smart_money_up":      "Up day + high volume. Institutional participation distinguishes genuine breakouts from retail-only pumps.",
-            "retail_exhaustion":   "Closed near low + vol spike. In this regime, HIGH value = FOMO buyers trapped → distribution top.",
-            "conviction_close":    "High = buyers held their ground: continuation likely. Sudden drop = distribution has begun.",
+            "smart_money_up":    "Up day + high volume. Institutional participation distinguishes genuine breakouts from retail-only pumps; persistent = continuation.",
+            "dist_ma":           "Distance of close from MA5. Moderately positive = healthy; extreme positive = overbought, fade risk rising.",
+            "range_expansion_up":"Wide up-candle vs 20-day avg range. Confirms institutional conviction; combined with vol_accel = strong continuation signal.",
+            "zscore_return_neg": "Negative-tail z-score. Small pullback after breakout session; negative z within VB = buy-the-dip, not reversal.",
+            "delta_dist":        "Day-over-day velocity vs MA5. Very high = price stretching fast = breakout fuel remaining; turning flat = nearing exhaustion.",
+            "vol_accel":         "Volume acceleration. Fuel gauge for the burst: rising vol on up-days = continuation; fading during limit-up streak = top approaching.",
+            "limit_up_streak":   "Consecutive limit-up days. Vietnam FOMO burst creates structural momentum; unmatched buy queue spills to next open; longest streaks precede sharp reversals.",
+            "conviction_close":  "close_pos × log(1 + vol_spike). High = buyers held their ground with volume = continuation. Sudden drop = distribution has begun.",
         },
     },
 }
@@ -493,7 +471,7 @@ def _build_shared_base(
     # ── Momentum indicators ───────────────────────────────────────────────────
     g["_rsi14"]      = _rsi(close, window=14)
 
-    _ema12           = close.ewm(span=12, adjust=False).mean() # 
+    _ema12           = close.ewm(span=12, adjust=False).mean() # adjust span specific to vietnam observation
     _ema26           = close.ewm(span=26, adjust=False).mean()
     g["_macd_line"]  = _ema12 - _ema26
     g["_macd_hist"]  = g["_macd_line"] - g["_macd_line"].ewm(span=9, adjust=False).mean()
@@ -528,8 +506,13 @@ def _build_shared_base(
     # 1.0 = closed at session high, 0.0 = closed at session low
     g["_close_pos"]  = (close - low) / (high - low + EPS)
 
-    # ── Overnight gap ─────────────────────────────────────────────────────────
+    # ── Overnight gap — split by direction (same tail-domination logic as zscore_return)
+    # gap_down (<0): cascade/forced-selling continuation → bear regimes
+    # gap_up   (>0): FOMO/positive-sentiment continuation → bull regimes
+    # Using a single coefficient collapses two distinct economic signals into one.
     g["_gap"]        = (open_ - close.shift(1)) / (close.shift(1) + EPS)
+    g["gap_down"]    = g["_gap"].clip(upper=0)   # negative-only: gap-down magnitude
+    g["gap_up"]      = g["_gap"].clip(lower=0)   # positive-only: gap-up magnitude
 
     # ── RSI divergence (reused in quiet_bear + panic_bear) ───────────────────
     _price_up        = (close.diff() > 0).astype(int)
@@ -611,6 +594,22 @@ def _build_shared_base(
     # Use in QUIET_BEAR where cascade rarely builds.
     g["seller_exhaustion_fresh"] = g["seller_exhaustion"] * (1.0 - _cascade_norm)
 
+    # iss — Isolated Selling Shock
+    # Combines four conditions in one scalar:
+    #   zscore_return_neg : drop is statistically unusual (negative tail only)
+    #   (1 - cascade_norm): NOT part of an ongoing crash (isolated event)
+    #   vol_relative      : attention spike — retail is reacting
+    #   (1 - close_pos)   : sellers were aggressive (closed near low)
+    # Interpretation: "retail panic in a calm market → exhaustion bounce likely"
+    # Designed for QUIET_BEAR where cascades are rare and single-day spikes revert.
+    _vol_rel = g["_roll_std5"] / (g["_roll_mean5"] + EPS)
+    g["iss"] = (
+        g["zscore_return_neg"]
+        * (1.0 - _cascade_norm)
+        * _vol_rel
+        * (1.0 - g["_close_pos"])
+    )
+
     # seller_exhaustion_late — selling pressure on top of an existing cascade
     # cascade_norm ≈ 0  → weight ≈ 0.0  (no cascade yet, not relevant)
     # cascade_norm ≈ 1  → weight ≈ 1.0  (3 consecutive extreme days → forced liq. exhausted)
@@ -624,6 +623,37 @@ def _build_shared_base(
     # Predicted direction: bearish (high value → next-day weakness likely).
     _up_day = (g["_ret"] > 0).astype(float)
     g["distribution_pressure"] = _up_day * (1.0 - g["_close_pos"]) * g["_vol_spike"]
+
+    # ── oversold_stable — gating composite feature ────────────────────────────
+    # Formula:
+    #   oversold_strength = (1 - z_pct) + (1 - dist_pct)   [how extreme the dip]
+    #   × (1 - cascade_norm)                                [NOT already in cascade]
+    #   × (1 - vol_regime_spike)                            [volatility NOT elevated]
+    #   × (1 - (down_ratio > 0.6))                          [market NOT broadly weak]
+    #
+    # High value → very oversold in a stable market → strong bounce candidate
+    # Low value → either not oversold OR system is in stress (gated out)
+    #
+    # Note: vol_regime_spike uses RETURN volatility (sigma), not volume.
+    # _vol_spike above is a volume ratio — different concept.
+    _z_pct    = g["_zscore_ret"].rolling(252, min_periods=63).rank(pct=True)
+    _dist_ma  = (close - g["_ma5"]) / (g["_ma5"] + EPS)
+    _dist_pct = _dist_ma.rolling(252, min_periods=63).rank(pct=True)
+
+    _oversold_strength = (1.0 - _z_pct) + (1.0 - _dist_pct)   # range [0, 2]; 2 = max oversold
+
+    _vol_regime_spike  = (
+        g["_vol20_std"] > g["_vol20_std"].rolling(60, min_periods=20).quantile(0.8)
+    ).astype(float)
+
+    _down_ratio = (g["_ret"] < 0).rolling(10, min_periods=5).mean()
+
+    g["oversold_stable"] = (
+        _oversold_strength
+        * (1.0 - _cascade_norm)
+        * (1.0 - _vol_regime_spike)
+        * (1.0 - (_down_ratio > 0.6).astype(float))
+    )
 
     return g
 
@@ -650,22 +680,31 @@ def _build_quiet_bear_features(g: pd.DataFrame) -> pd.DataFrame:
     g["dist_ma"]        = (close - g["_ma5"]) / (g["_ma5"] + EPS)
     g["rsi_divergence"] = g["_rsi_div"]
     g["close_position"] = g["_close_pos"]
-    g["gap"]            = g["_gap"]
+    g["gap"]            = g["_gap"]        # kept for backward compat; prefer splits below
+    g["gap_down"]       = g["gap_down"]    # negative-only: cascade / forced-selling signal
     g["vol_relative"]   = g["_roll_std5"] / (g["_roll_mean5"] + EPS)
 
+    # mean-reversion signal, since we already detect regime
+    # for quiet bear, if oversold and exhaustion & bounce -> buy
+
+   
+    
+    
     # ── Obs 1: herd momentum ──────────────────────────────────────────────────
     # Fraction of up-days in last 10 sessions.
     # Low value = bearish consensus building (retail all selling together).
     # Can precede a mean-reversion bounce when extreme.
-    daily_up               = (close.diff() > 0).astype(int)
-    g["herd_momentum_10"]  = daily_up.rolling(10).mean()
+    #daily_up               = (close.diff() > 0).astype(int)
+    #g["herd_momentum_10"]  = daily_up.rolling(10).mean()
 
     # ── Obs 3: T+2 forced selling ─────────────────────────────────────────────
     # A sharp drop 2 sessions ago means those buyers' shares are settling today.
     # They are forced sellers. When combined with current elevated volume,
     # this predicts continuation of the decline.
-    sharp_drop_2d         = (g["_ret"].shift(2) < -0.04).astype(int)
-    g["t2_forced_selling"] = sharp_drop_2d * g["_vol_spike"]
+    #sharp_drop_2d         = (g["_ret"].shift(2) < -0.04).astype(int)
+    #g["t2_forced_selling"] = sharp_drop_2d * g["_vol_spike"]
+    
+    
 
     # ── Obs 5: ATC distribution ───────────────────────────────────────────────
     # Up day in continuous trading, but institutions dumped at ATC close.
@@ -673,6 +712,10 @@ def _build_quiet_bear_features(g: pd.DataFrame) -> pd.DataFrame:
     g["intraday_distribution"] = (g["_ret"] > 0).astype(int) * (1.0 - g["_close_pos"])
 
     # conviction_close and retail_exhaustion come from shared base
+   
+    
+    
+    
 
     return g
 
@@ -798,7 +841,8 @@ def _build_volatile_bull_features(g: pd.DataFrame) -> pd.DataFrame:
     dist                 = (close - g["_ma5"]) / (g["_ma5"] + EPS)
     g["delta_dist"]      = dist.diff()
     g["macd_hist_slope"] = g["_macd_hist"].diff()
-    g["gap"]             = g["_gap"]
+    g["gap"]             = g["_gap"]        # kept for backward compat
+    g["gap_up"]          = g["gap_up"]      # positive-only: FOMO / bullish sentiment gap
     g["vol_accel"]       = g["_vol_chg"].diff()
     g["z_window"]        = (close - g["_roll_mean5"]) / (g["_roll_std5"] + EPS)
     g["limit_up"]        = g["_limit_up"]
