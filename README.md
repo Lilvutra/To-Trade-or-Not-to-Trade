@@ -108,6 +108,51 @@ The model is a **Regime-Aware Mixture of Experts (MoE)** that routes each stock-
 
 **Output** — the final prediction is `expert_logits + 0.3 × shared_logits`, giving a three-class signal: **sell** (predicted 10-day return < −3%), **hold**, or **buy** (predicted 10-day return > +5%).
 
+## Routing Modes
+
+The router decides which expert(s) contribute to the final prediction. Three modes are available, controlled by `ROUTING_MODE` in `train_regime_expert.py`.
+
+### Hard routing
+Each sample is sent to exactly one expert — the one whose index matches the precomputed regime label. All other experts are bypassed entirely.
+
+```
+regime = PANIC_BEAR (1)  →  only Expert 1 computes logits
+gradient flows through Expert 1 only
+```
+
+**When to use**: when you trust the regime detector fully and want strict specialisation. Each expert trains only on its own regime's data and cannot borrow patterns from others. This is the most interpretable mode — you can inspect each expert in isolation.
+
+**Downside**: at regime transition points (e.g. the market is shifting from QUIET_BEAR to PANIC_BEAR), the hard switch can produce discontinuous predictions.
+
+---
+
+### Soft routing
+All four experts always compute logits. Their outputs are blended using a weight vector derived from the regime label — currently a one-hot vector, so numerically the result is the same as hard routing, but the gradient flows through all four experts scaled by their weight.
+
+```
+regime = PANIC_BEAR (1)  →  weights = [0, 1, 0, 0]
+final_logit = 0·Expert0 + 1·Expert1 + 0·Expert2 + 0·Expert3
+gradient still reaches Expert 0, 2, 3 (scaled by 0 — but they stay in the graph)
+```
+
+**When to use**: when you want all experts to remain active and learn from every batch. With an external regime probability vector (e.g. `[0.1, 0.7, 0.1, 0.1]` from a probabilistic classifier), soft routing naturally handles regime uncertainty by blending expert outputs proportionally.
+
+**Downside**: slightly slower (four forward passes instead of one) and the non-dominant experts receive zero gradient in practice when a one-hot is used, so they still specialise — just via a different code path than hard routing.
+
+---
+
+### Blend routing
+A hybrid: uses **hard** routing when the model is confident about the regime, and **soft** routing when it is uncertain. Confidence is measured as `max(regime_probs)` — if it exceeds `CONFIDENCE_THRESHOLD` (default 0.70), hard routing is used; otherwise all experts blend.
+
+```
+regime_probs = [0.05, 0.80, 0.10, 0.05]  →  max=0.80 ≥ 0.70  →  hard (Expert 1)
+regime_probs = [0.30, 0.40, 0.20, 0.10]  →  max=0.40 < 0.70  →  soft (weighted blend)
+```
+
+**When to use**: when the upstream regime detector outputs a probability distribution rather than a hard label — typically at turning points between regimes. Blend lets the model hedge at uncertain transitions while still committing to one expert when the regime is clear.
+
+**Downside**: requires an external probabilistic regime classifier to be meaningful. If only a hard regime label is available, blend degrades to pure hard routing (no uncertainty signal to act on).
+
 
 
 
