@@ -105,13 +105,13 @@ from get_regime import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 DATA_PATH   = "./data/data-vn-20230228/stock-historical-data/VCB-VNINDEX-History.csv"
-HORIZON     = 5        # days forward for return label
+HORIZON     = 10   # days forward for return label
 SEQ_LEN     = 20        # LSTM look-back window
-N_EXPERTS   = 4         # one per regime: QUIET_BEAR, PANIC_BEAR, QUIET_BULL, VOLATILE_BULL
+N_EXPERTS   = 7         # one per regime: QUIET_BEAR, PANIC_BEAR, QUIET_BULL, VOLATILE_BULL
 N_REGIMES   = 4
 HIDDEN_LSTM = 64        # LSTM hidden dim
 HIDDEN_MLP  = 64        # expert MLP hidden dim
-DROPOUT     = 0.2
+DROPOUT     = 0.1
 EPOCHS      = 80
 BATCH_SIZE  = 64
 LR          = 1e-5
@@ -123,7 +123,7 @@ DEVICE      = "mps" if torch.backends.mps.is_available() else "cpu"
 # "hard"  : deterministic — regime label selects one expert
 # "soft"  : probabilistic — weighted blend of all experts
 # "blend" : hard when confident, soft when uncertain
-ROUTING_MODE         = "hard"
+ROUTING_MODE         = "soft"
 CONFIDENCE_THRESHOLD = 0.70   # used only in "blend" mode
 
 # ── Optional shared residual ──────────────────────────────────────────────────
@@ -136,7 +136,7 @@ SHARED_ALPHA        = 0.3     # how much the shared model contributes
 PATIENCE = 15   # stop if val loss does not improve for this many epochs
 
 # ── Return label thresholds ───────────────────────────────────────────────────
-SELL_THRESH = -0.03   # HORIZON-day return < -3% → sell (0)
+SELL_THRESH = -0.03  # HORIZON-day return < -3% → sell (0)
 BUY_THRESH  =  0.05   # HORIZON-day return > +5% → buy  (2)
                       # otherwise              → hold (1)
 

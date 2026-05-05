@@ -120,15 +120,15 @@ REGIME_FEATURES: dict[int, list[str]] = {
     ],
     REGIME_ID["PANIC_BEAR"]: [
         # Core — joint FM dominant signals in PB (|t| ≥ 3.0)
-        "smart_money_up",           # +9.26: institutions buying into panic = strongest bottom signal
-        "range_expansion_up",       # −6.52: wide up-candle in panic = exhaustion reversal
-        "dist_ma",                  # −5.55: price far below MA = mean-reversion setup
-        "gap_down",                 # gap-down only: cascade severity marker (no gap-up noise in panic)
-        # Supporting (1.0 ≤ |t| < 3.0)
-        "delta_dist",               # +2.23: MA velocity — acceleration into panic trough
-        "seller_exhaustion_fresh",  # +1.88: isolated spike without cascade → near-term bounce
+        "smart_money_up",           # +12.7: institutions buying into panic = strongest bottom signal
+        "range_expansion_up",       # −2.2: wide up-candle in panic = exhaustion reversal
+        "dist_ma",                  # −1.4: price far below MA = mean-reversion setup
+        "gap_down",                 # -0.8 gap-down only: cascade severity marker (no gap-up noise in panic)
+        # Supporting
+        "delta_dist",               # +1.4: MA velocity — acceleration into panic trough
+        "seller_exhaustion_fresh",  # +5.2: isolated spike without cascade → near-term bounce
         # Context (Vietnam structural)
-        "limit_down_conviction",    # limit-down + high vol = trapped-seller queue overhang
+        "limit_down_conviction",    # -1.7 limit-down + high vol = trapped-seller queue overhang
     ],
     REGIME_ID["QUIET_BULL"]: [
         # Core signals (|t| ≥ 2.5 in joint FM)
