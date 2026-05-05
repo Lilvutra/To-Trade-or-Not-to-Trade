@@ -122,7 +122,7 @@ gradient flows through Expert 1 only
 
 **When to use**: when you trust the regime detector fully and want strict specialisation. Each expert trains only on its own regime's data and cannot borrow patterns from others. This is the most interpretable mode — you can inspect each expert in isolation.
 
-**Downside**: at regime transition points (e.g. the market is shifting from QUIET_BEAR to PANIC_BEAR), the hard switch can produce discontinuous predictions.
+**Downside**: If regime detection is not accurate, this will cause false predictions and misinterpretations
 
 ---
 
@@ -137,7 +137,7 @@ gradient still reaches Expert 0, 2, 3 (scaled by 0 — but they stay in the grap
 
 **When to use**: when you want all experts to remain active and learn from every batch. With an external regime probability vector (e.g. `[0.1, 0.7, 0.1, 0.1]` from a probabilistic classifier), soft routing naturally handles regime uncertainty by blending expert outputs proportionally.
 
-**Downside**: slightly slower (four forward passes instead of one) and the non-dominant experts receive zero gradient in practice when a one-hot is used, so they still specialise — just via a different code path than hard routing.
+**Downside**: slightly slower (four forward passes instead of one) and the non-dominant experts receive zero gradient in practice when a one-hot is used, so they still specialise — just via a different code path than hard routing(since currently we are use regime interger hardcoded)
 
 ---
 
