@@ -30,7 +30,7 @@ To-Trade-or-Not-to-Trade/
 
 ## Model Architecture 
 
-![Current MoE Architecture](data/MoE_arch.drawio.png)
+![Current MoE Architecture](MoE_arch.drawio.png)
 
 
 
