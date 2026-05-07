@@ -63,12 +63,10 @@ Universal feature (all regimes)
 
 Usage
 -----
-    from vnstock_trade.features.detect_regime import build_conditional_features
-
-    df = pd.read_csv("data/VNM-VNINDEX-History.csv")
-    df["TradingDate"] = pd.to_datetime(df["TradingDate"])
-    result = build_conditional_features(df)
-    # result has columns: regime, regime_name, conviction_close, + regime features
+1. Run detect_regime() to assign a regime label to each row using only past
+   information.
+2. Build regime-specific features by slicing the DataFrame by regime and applying the relevant feature functions from REGIME_FEATURES.
+   
 """
 
 from __future__ import annotations
@@ -346,7 +344,7 @@ def detect_regime(
 
     3. Momentum axis  — resolves the sideways zone
          cum_ret = close / close.shift(mom_window) - 1
-         is_up_momentum   = cum_ret > 0 # can set to > 0.02 for example
+         is_up_momentum   = cum_ret > 0
          is_down_momentum = cum_ret < 0
        A day in the sideways band that has a positive cumulative return over
        the last mom_window days is trending UP, just not sharply enough to
@@ -372,7 +370,6 @@ def detect_regime(
     # ── Volatility axis ───────────────────────────────────────────────────────
     # Log returns are more stable than simple returns for vol estimation —
     # large daily moves (Vietnam limit-hits) are dampened by the log transform.
-    
     log_ret     = np.log(close).diff()
     current_vol = log_ret.rolling(vol_window).std()
     vol_median  = current_vol.rolling(vol_baseline).median()

@@ -107,11 +107,11 @@ from get_regime import (
 DATA_PATH   = "./data/data-vn-20230228/stock-historical-data/VCB-VNINDEX-History.csv"
 HORIZON     = 10   # days forward for return label
 SEQ_LEN     = 20        # LSTM look-back window
-N_EXPERTS   = 7         # one per regime: QUIET_BEAR, PANIC_BEAR, QUIET_BULL, VOLATILE_BULL
+N_EXPERTS   = 4         # one per regime: QUIET_BEAR, PANIC_BEAR, QUIET_BULL, VOLATILE_BULL
 N_REGIMES   = 4
 HIDDEN_LSTM = 64        # LSTM hidden dim
 HIDDEN_MLP  = 64        # expert MLP hidden dim
-DROPOUT     = 0.1
+DROPOUT     = 0.5
 EPOCHS      = 80
 BATCH_SIZE  = 64
 LR          = 1e-5
@@ -130,7 +130,7 @@ CONFIDENCE_THRESHOLD = 0.70   # used only in "blend" mode
 # A global MLP sees every sample regardless of regime.
 # final_logit = expert_logit + SHARED_ALPHA * global_logit
 USE_SHARED_RESIDUAL = True
-SHARED_ALPHA        = 0.3     # how much the shared model contributes
+SHARED_ALPHA        = 0.5     # how much the shared model contributes
 
 # ── Early stopping ────────────────────────────────────────────────────────────
 PATIENCE = 15   # stop if val loss does not improve for this many epochs

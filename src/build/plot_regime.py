@@ -68,50 +68,100 @@ REGIME_IDS   = {name: i for i, name in enumerate(REGIME_ORDER)}
 # ─────────────────────────────────────────────────────────────────────────────
 
 def label_true_regime(
-    df:          pd.DataFrame,
-    window:      int   = 20,    # trading days ≈ 1 calendar month in Vietnam
-    bull_thresh: float = 0.04,  # +4% over window → VOLATILE_BULL
-    bear_thresh: float = 0.04,  # -4% over window → PANIC_BEAR
-    close_col:   str   = "Close",
+    df:           pd.DataFrame,
+    window:       int = 20,    # trading days — horizon for both direction and vol
+    vol_baseline: int = 252,   # past rolling window for vol_median anchor
+    close_col:    str = "Close",
 ) -> pd.DataFrame:
     """
-    Assign a "ground truth" regime to every row using the actual price
-    return over the past `window` trading days.
+    Assign a zero-lag ground-truth regime to every row using forward-looking axes.
 
-    This is the simplest possible regime classifier:
-      - no volatility, no trend indicators, no rolling stats
-      - just: where did price go over the last month?
+    Both axes look FORWARD from day t — what actually happened over the next
+    `window` trading days.  This eliminates the detection lag that makes a
+    backward-looking label compare two lagged signals instead of detector vs oracle.
 
-    Why use this?
-    -------------
-    detect_regime() uses volatility + trend direction, which is predictive
-    but may mislabel transition periods.  label_true_regime() uses realised
-    returns, which is unambiguous but only observable in hindsight (for
-    production you'd use the previous month's return, which is also historical
-    and look-ahead-free at prediction time).
+    The last `window` rows are set to NaN (no future data available).
+
+    Two axes
+    --------
+    1. Direction axis  (forward `window`-day realised return)
+         future_ret[t] = close[t+window] / close[t] - 1
+         is_bull       = future_ret >= 0
+         is_bear       = future_ret <  0
+       Answers: "did price end higher or lower over the NEXT month?"
+       Implementation: close.pct_change(window).shift(-window)
+
+    2. Volatility axis  (forward realised vol vs past long-run median)
+         log_ret      = diff(log(close))
+         future_vol[t] = std(log_ret[t+1 .. t+window])   ← forward
+         vol_median[t] = rolling(vol_baseline).median(past log_ret std)  ← past
+         is_high_vol   = future_vol > vol_median
+       Implementation: log_ret.rolling(window).std().shift(-window)
+
+       vol_median stays backward-looking — it is the historical baseline that
+       existed at time t.  Comparing future_vol against it answers:
+       "was the NEXT month more turbulent than this stock's normal level?"
+
+    Why forward-looking fixes the vol_median contamination problem
+    --------------------------------------------------------------
+    Backward label_true_regime: direction axis uses past 20 days, which still
+    reflects the prior regime at a transition point (e.g. March 1 2020 looks
+    QUIET_BULL because the past 20 days were mostly pre-crash). The forward
+    version immediately sees the crash: the NEXT 20 days from March 1 contain
+    the full COVID drawdown → PANIC_BEAR on day 1 of the crash.
+
+    The vol_median contamination (post-crash baseline stays elevated for ~252
+    days) still affects the vol axis, but the direction axis is now always
+    correct.  For regime detection purposes, direction correctness matters more:
+    PANIC_BEAR vs QUIET_BEAR confusion is more damaging than PANIC_BEAR vs
+    VOLATILE_BULL.
 
     Returns
     -------
     df with two new columns:
-      true_regime      : int  [0=QUIET_BEAR, 1=PANIC_BEAR, 2=QUIET_BULL, 3=VOLATILE_BULL]
-      true_regime_name : str
+      true_regime      : float (NaN for last `window` rows)
+                         [0=QUIET_BEAR, 1=PANIC_BEAR, 2=QUIET_BULL, 3=VOLATILE_BULL]
+      true_regime_name : str  (NaN for last `window` rows)
     """
-    df = df.copy().reset_index(drop=True)
+    df    = df.copy().reset_index(drop=True)
+    close = df[close_col]
+    log_ret = np.log(close).diff()
 
-    # pct_change(window) at row t = close[t] / close[t-window] - 1
-    # entirely historical — no look-ahead at any row t
-    monthly_ret = df[close_col].pct_change(window)
+    # ── Direction axis — FORWARD-LOOKING ─────────────────────────────────────
+    # close.pct_change(window) at index i = close[i]/close[i-window] - 1
+    # .shift(-window) pulls that value window steps earlier, giving:
+    #   future_ret[t] = close[t+window] / close[t] - 1
+    future_ret = close.pct_change(window).shift(-window)
+    is_bull    = future_ret >= 0
+    is_bear    = future_ret <  0
 
-    # Default: QUIET_BEAR 
-    regime = pd.Series(REGIME_IDS["QUIET_BEAR"], index=df.index, name="true_regime")
+    # ── Volatility axis — forward vol vs past baseline ────────────────────────
+    # log_ret.rolling(window).std() at index i = std of log_ret[i-window+1 .. i]
+    # .shift(-window) shifts to i+window, giving std of log_ret[i+1 .. i+window]
+    past_vol   = log_ret.rolling(window).std()
+    vol_median = past_vol.rolling(vol_baseline).median()
+    vol_median = vol_median.fillna(past_vol.expanding().median())
+    future_vol  = past_vol.shift(-window)
+    is_high_vol = future_vol > vol_median
 
-    regime[monthly_ret >= bull_thresh]                            = REGIME_IDS["VOLATILE_BULL"]
-    regime[(monthly_ret >= 0) & (monthly_ret < bull_thresh)]      = REGIME_IDS["QUIET_BULL"]
-    regime[(monthly_ret < 0)  & (monthly_ret > -bear_thresh)]     = REGIME_IDS["QUIET_BEAR"]
-    regime[monthly_ret <= -bear_thresh]                           = REGIME_IDS["PANIC_BEAR"]
+    # ── Regime matrix ─────────────────────────────────────────────────────────
+    regime = pd.Series(
+        np.where(is_bear & ~is_high_vol, float(REGIME_IDS["QUIET_BEAR"]),
+        np.where(is_bull & ~is_high_vol, float(REGIME_IDS["QUIET_BULL"]),
+        np.where(is_bull &  is_high_vol, float(REGIME_IDS["VOLATILE_BULL"]),
+        np.where(is_bear &  is_high_vol, float(REGIME_IDS["PANIC_BEAR"]),
+                 np.nan)))),
+        index=df.index,
+        name="true_regime",
+    )
+
+    # Last `window` rows have no forward data
+    regime.iloc[-window:] = np.nan
 
     df["true_regime"]      = regime
-    df["true_regime_name"] = df["true_regime"].map(REGIME_NAME)
+    df["true_regime_name"] = df["true_regime"].map(
+        lambda x: REGIME_NAME.get(int(x)) if pd.notna(x) else np.nan
+    )
 
     return df
 
@@ -136,7 +186,7 @@ def print_regime_agreement(
     overall = (detected == true).mean()
     print(f"\n{'─'*54}")
     print(f"  Regime agreement: {overall*100:.1f}%  ({(detected==true).sum()}/{len(true)} days)")
-    print(f"  Window: {window} trading days  |  thresholds: ±4%")
+    print(f"  Window: {window} trading days  |  axes: return direction + rolling vol vs median")
     print(f"{'─'*54}")
 
     print(f"\n  {'Regime':<18s}  {'n_true':>7}  {'agree%':>7}  {'detected_as (top 2)':>22}")
@@ -223,9 +273,8 @@ def _confusion_heatmap(ax: plt.Axes, df: pd.DataFrame) -> None:
 
 def plot_regime(
     data_path:   str,
-    window:      int   = 30,    # true-regime window in trading days
-    bull_thresh: float = 0.06,  # 4 % → VOLATILE_BULL
-    bear_thresh: float = 0.05,  # -5 % → PANIC_BEAR
+    window:      int = 20,      # true-regime window in trading days
+    vol_baseline: int = 252,    # long-run vol baseline for true regime
     save_path:   str | None = None,
 ) -> None:
     """
@@ -244,9 +293,8 @@ def plot_regime(
     df = build_conditional_features(raw, market_index=market_index)
     df = df.sort_values("TradingDate").reset_index(drop=True)
 
-    # true regime via actual monthly return
-    df = label_true_regime(df, window=window,
-                           bull_thresh=bull_thresh, bear_thresh=bear_thresh)
+    # true regime via realised return + realised volatility
+    df = label_true_regime(df, window=window, vol_baseline=vol_baseline)
 
     ticker = os.path.basename(data_path).split("-")[0]
 
@@ -267,7 +315,7 @@ def plot_regime(
 
     fig.suptitle(
         f"{ticker}  —  Detected Regime vs True Regime  "
-        f"(window={window}d, thresh=±{bull_thresh*100:.0f}%)",
+        f"(window={window}d, vol_baseline={vol_baseline}d)",
         fontsize=13, fontweight="bold",
     )
 
@@ -358,8 +406,7 @@ if __name__ == "__main__":
     DATA_PATH = "./data/data-vn-20230228/stock-historical-data/VCB-VNINDEX-History.csv"
     plot_regime(
         DATA_PATH,
-        window=30,
-        bull_thresh=0.06,
-        bear_thresh=0.05,
+        window=20,
+        vol_baseline=252,
         save_path="./data/regime_comparison_VCB.png",
     )

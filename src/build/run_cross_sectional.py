@@ -470,7 +470,26 @@ if __name__ == "__main__":
     print(f"\nFeatures ({len(features)}): {features}")
 
     # ------------------------------------------------------------------
-    # 3. Cross-sectional regression (WLS by volatility, no industry col)
+    # 3. Build market regime from VCB proxy
+    # ------------------------------------------------------------------
+    vcb_path = os.path.join(DATA_DIR, "VCB-VNINDEX-History.csv")
+    vcb_raw  = pd.read_csv(vcb_path)
+    vcb_raw["TradingDate"] = pd.to_datetime(vcb_raw["TradingDate"])
+    vcb_feat = build_conditional_features(vcb_raw, market_index="VNINDEX")
+    vcb_feat = vcb_feat.rename(columns={"TradingDate": "date"})
+    vcb_feat["date"] = pd.to_datetime(vcb_feat["date"])
+
+    regime_change              = (vcb_feat["regime"] != vcb_feat["regime"].shift()).cumsum()
+    vcb_feat["days_in_regime"] = vcb_feat.groupby(regime_change).cumcount()
+
+    regime_map   = vcb_feat.set_index("date")["regime"].rename("regime")
+    days_map     = vcb_feat.set_index("date")["days_in_regime"]
+
+    # Attach days_in_regime to panel so FM can split on it
+    df["days_in_regime"] = df["date"].map(days_map)
+
+    # ------------------------------------------------------------------
+    # 4. Cross-sectional regression (WLS by volatility, no industry col)
     # ------------------------------------------------------------------
     factor_df = run_cross_sectional_regression(
         df,
@@ -481,27 +500,17 @@ if __name__ == "__main__":
     print(f"\nFactor returns shape: {factor_df.shape}")
 
     # ------------------------------------------------------------------
-    # 4. Full-sample Fama-MacBeth summary
+    # 5. Full-sample Fama-MacBeth summary
     # ------------------------------------------------------------------
     full_summary = fama_macbeth_summary(factor_df)
     print("\n=== Full-sample Fama-MacBeth ===")
     print(full_summary.to_string())
 
     # ------------------------------------------------------------------
-    # 5. Regime-conditional Fama-MacBeth
-    #    Derive a single market-level regime from VCB (large-cap VNINDEX proxy).
-    #    This avoids the per-stock mode collapsing everything to QUIET_BEAR.
+    # 6. Regime-conditional Fama-MacBeth
     # ------------------------------------------------------------------
-    vcb_path = os.path.join(DATA_DIR, "VCB-VNINDEX-History.csv")
-    vcb_raw = pd.read_csv(vcb_path)
-    vcb_raw["TradingDate"] = pd.to_datetime(vcb_raw["TradingDate"])
-    vcb_feat = build_conditional_features(vcb_raw, market_index="VNINDEX")
-    vcb_feat = vcb_feat.rename(columns={"TradingDate": "date"})
-    vcb_feat["date"] = pd.to_datetime(vcb_feat["date"])
-    regime_map = vcb_feat.set_index("date")["regime"].rename("regime")
-
     factor_df_with_regime = factor_df.join(regime_map)
-    print("\nMarket-regime distribution (from VCB proxy):")
+    print("\nMarket-regime distribution (from VCB proxy, stability-filtered):")
     print(factor_df_with_regime["regime"].value_counts().sort_index())
 
     regime_results = regime_fama_macbeth(factor_df_with_regime)
@@ -512,8 +521,7 @@ if __name__ == "__main__":
         print(result.to_string())
 
     # ------------------------------------------------------------------
-    # 6. Univariate Fama-MacBeth — each feature alone, all stocks, all time
-    #    Measures raw standalone predictive power with no multicollinearity.
+    # 7. Univariate Fama-MacBeth — each feature alone, all stocks, all time
     # ------------------------------------------------------------------
     print("\n\n" + "═"*60)
     print("  UNIVARIATE FM — standalone signal strength per feature")
@@ -522,10 +530,26 @@ if __name__ == "__main__":
     print(uni[["mean", "t_stat", "n_dates"]].to_string())
 
     # ------------------------------------------------------------------
-    # 7. Regime-proper FM — separate regression per regime, regime's features only
-    #    Mirrors training pipeline: one model per regime, correct feature subset.
+    # 8. Regime-proper FM — run twice to separate transition vs core signals
+    #
+    #    Pass 1 (all rows): includes transition days — features that appear
+    #    strong here but weak in pass 2 are transition-driven signals that
+    #    fire at regime boundaries, not deep inside the regime.
+    #
+    #    Pass 2 (core only, days_in_regime ≥ 10): excludes transition window.
+    #    Features strong here are genuinely regime-conditional deep signals.
+    #
+    #    Compare both: robust features are strong in both passes.
     # ------------------------------------------------------------------
     print("\n\n" + "═"*60)
-    print("  REGIME-PROPER FM — per-regime joint regression, correct features")
+    print("  REGIME-PROPER FM  [PASS 1 — ALL ROWS, includes transitions]")
     print("═"*60)
     regime_fm_proper(df, regime_map, return_col="return_1")
+
+    df_core = df[df["days_in_regime"] >= 10].copy()
+    n_dropped = len(df) - len(df_core)
+    print(f"\n\n{'═'*60}")
+    print(f"  REGIME-PROPER FM  [PASS 2 — CORE REGIME ONLY, days_in_regime ≥ 10]")
+    print(f"  Transition rows dropped: {n_dropped:,} ({n_dropped/len(df)*100:.1f}%)")
+    print("═"*60)
+    regime_fm_proper(df_core, regime_map, return_col="return_1")
