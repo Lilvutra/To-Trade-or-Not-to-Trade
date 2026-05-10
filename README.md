@@ -6,8 +6,10 @@ An quantitative pipeline for Vietnam stock data
 - **Data Preprocessing**
 - **Feature engineering**
 - **Feature selection**
+- **Fama-MacBeth cross-sectional regression**
+- **Regime detection (drawdown + rolling-window)**
 - **Mixture of Expert model architecture**
-- **Portfolio optimization**
+- **Portfolio construction (profitability scoring + risk scoring + weight optimisation)**
 
 ## Project Structure 
 
@@ -27,11 +29,20 @@ To-Trade-or-Not-to-Trade/
 │   │   ├── factor_returns.csv              # Daily factor return time series
 │   │   ├── full_summary.csv                # Full-sample FM summary statistics
 │   │   ├── regime_QUIET_BEAR.csv           # Per-regime FM results
-|   |   ├── regime_QUIET_BEAR.csv
 │   │   ├── regime_PANIC_BEAR.csv
 │   │   ├── regime_QUIET_BULL.csv
 │   │   ├── regime_VOLATILE_BULL.csv
-│   │   └── plot_*.png                      # Diagnostic plots (t-stats, Sharpe, heatmaps)
+│   │   └── plot_*.png                      # Diagnostic plots (t-stats, Sharpe, heatmaps,
+│   │                                       #   factor return series, pass comparison)
+│   │
+│   ├── portfolio/                          # Portfolio construction outputs
+│   │   ├── portfolio.csv                   # Final portfolio: weights, scores, projected PnL
+│   │   ├── excluded.csv                    # Excluded stocks with primary risk driver
+│   │   ├── profitability_all.csv           # Factor scores for full universe
+│   │   ├── risk_all.csv                    # Risk scores for full universe
+│   │   ├── plot_portfolio.png              # Portfolio weight bar chart
+│   │   ├── plot_risk_return.png            # Risk vs profitability scatter
+│   │   └── plot_exclusions.png             # Exclusion breakdown by risk dimension
 │   │
 │   ├── ohlcv_encoder.pt                    # Pre-trained OHLCV LSTM autoencoder weights
 │   ├── regime_moe_model.pt                 # Trained MoE model (baseline)
@@ -80,7 +91,11 @@ To-Trade-or-Not-to-Trade/
 │   │   ├── fetch_all_vn_data.py            # Fetch raw Vietnam market data
 │   │   └── consolidate_all_stocks.py       # Consolidate per-stock CSVs
 │   │
-│   └── test/                               # Test scripts
+│   └── test/                               # Portfolio construction modules
+│       ├── score_profitability.py          # Profitable stock selection (FM-based scoring)
+│       ├── score_risk.py                   # Risk scoring model (6 dimensions)
+│       ├── build_portfolio.py              # Portfolio construction + weight optimisation
+│       └── run_portfolio.py               # Entry point — runs full portfolio pipeline
 │
 └── README.md
 ```
@@ -236,6 +251,87 @@ Full-sample FM over 150 stocks and 3,547 cross-sections (2009–2023):
 | `limit_down_conviction` | +0.59 | Near-zero — primarily a qualitative context feature |
 
 > `limit_up_streak` and `seller_exhaustion_fresh` have strong univariate t-stats but lose signal in the joint regression due to multicollinearity with `smart_money_up` (shared volume-spike component). The joint regression is the more realistic test.
+
+---
+
+## Portfolio Construction
+
+The portfolio pipeline (`src/test/`) converts the FM factor research into a live portfolio recommendation. It runs in three sequential steps.
+
+### Step 1 — Profitable Stock Selection (`score_profitability.py`)
+
+**Methodology**: Reuses the Fama-MacBeth output already produced by `plot_cross_sectional.py`. For each stock on the evaluation date:
+
+1. Detect the current market regime from VCB (VNINDEX proxy).
+2. Load the regime-specific FM coefficient table (`regime_<NAME>.csv`).
+3. Cross-sectionally z-score every feature across the live universe — same standardisation applied during FM estimation.
+4. Compute the **factor score**: `score_i = Σ_f t_f × z_f,i` — each feature weighted by its Newey-West t-stat. Statistical confidence is folded into the score automatically; noisy signals (low `|t|`) self-shrink.
+5. Compute the **projected return** over a `H`-day horizon: `proj_ret = Σ_f β_f × z_f,i × H`, where `β_f` is the FM mean coefficient (capped at ±0.5%/day to suppress scale outliers).
+
+Why t-stat weighting over raw `β` weighting: a feature with `β=0.003, t=10` should dominate over one with `β=0.005, t=0.6`. The t-stat encodes cross-date consistency, not just average magnitude.
+
+**Current result (VOLATILE_BULL regime, 20-day horizon):** `CLC` (+24.4%), `ACB` (+8.8%), `CVT` (+8.6%), `HAH` (+8.5%), `DHC` (+8.0%) as top projected returns.
+
+---
+
+### Step 2 — Risk Scoring & Exclusion (`score_risk.py`)
+
+Each stock is scored across six risk dimensions, all normalised to [0, 1]:
+
+| Dimension | Weight | Metric | Vietnam rationale |
+|---|---|---|---|
+| Volatility | 25% | Annual vol (60d × √252) | High vol stocks amplify drawdowns; noisy returns reduce FM score precision |
+| Drawdown | 25% | Max drawdown over trailing 252d | Deep drawdowns signal distress or thin-book collapse |
+| Tail Risk | 20% | CVaR at 5% (mean of worst 5% days) | Captures asymmetric downside; near-limit-down sessions (-7% HOSE) produce non-normal tails |
+| Liquidity | 15% | 20d avg volume / universe median | Thinly traded stocks gap violently on any institutional order flow |
+| Trend | 10% | Stock-level regime + fraction of up-days | Confirmed downtrend = adverse momentum over FM signal horizon |
+| Structural | 5% | Near-limit-down sessions in last 10d | T+2 settlement creates forced-selling windows the day after limit-down sessions |
+
+**Exclusion threshold**: `risk_score ≥ 0.60` → excluded. In `PANIC_BEAR` regime the threshold tightens to 0.45 (systemic risk elevated, be more conservative).
+
+**Current result**: 46 of 150 stocks excluded (12 by trend, 11 by drawdown, 9 by tail risk, 7 by liquidity, 7 by volatility).
+
+---
+
+### Step 3 — Portfolio Composition (`build_portfolio.py`)
+
+| Parameter | Value |
+|---|---|
+| Universe | 150 VNINDEX stocks |
+| Risk filter | Exclude `risk_score ≥ threshold` (regime-adjusted) |
+| Selection | Top 20 by factor score from risk-approved universe |
+| Weighting | Score-proportional: `w_i ∝ max(score_i, ε)` |
+| Constraints | 2% min, 10% max per position |
+| Gross exposure | Regime-adjusted (see table below) |
+
+**Regime-adjusted gross exposure:**
+
+| Regime | Deployed | Cash | Rationale |
+|---|---|---|---|
+| `QUIET_BULL` | 100% | 0% | Full allocation — regime favours trend-following accumulation |
+| `VOLATILE_BULL` | 85% | 15% | Reduced — sharp intraday reversals can whipsaw concentrated positions |
+| `QUIET_BEAR` | 50% | 50% | Half invested — mean-reversion signals are selective; risk of sustained bleed |
+| `PANIC_BEAR` | 30% | 70% | Heavy cash — systemic forced-selling dominates; avoid being early |
+
+**Current portfolio (VOLATILE_BULL, 20 holdings, 85% invested):**
+
+| Rank | Ticker | Factor Score | Proj. Return | Risk Score | Weight |
+|---|---|---|---|---|---|
+| 1 | CLC | 62.8 | +24.4% | 0.24 | 10.0% |
+| 2 | BCE | 21.9 | +7.2% | 0.58 | 7.6% |
+| 3 | ACB | 20.3 | +8.8% | 0.24 | 7.1% |
+| 4 | CHP | 19.5 | +7.7% | 0.21 | 6.8% |
+| 5 | BIC | 18.6 | +7.6% | 0.39 | 6.5% |
+| … | … | … | … | … | … |
+
+Weighted average projected return: **+8.0%** over 20 trading days on a 1B VND notional.
+
+**Run:**
+```bash
+python3 src/test/run_portfolio.py
+```
+
+Outputs written to `data/portfolio/`: `portfolio.csv`, `excluded.csv`, `plot_portfolio.png`, `plot_risk_return.png`, `plot_exclusions.png`.
 
 ---
 

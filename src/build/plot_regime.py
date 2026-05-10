@@ -167,7 +167,143 @@ def label_true_regime(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. Agreement statistics
+# 2. Drawdown-based true regime labeler
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _find_peaks_troughs(close: pd.Series, min_move: float) -> list:
+    """
+    Zigzag algorithm.  Returns [(int_position, 'peak'|'trough'), ...].
+
+    A peak   is confirmed when price subsequently falls  >= min_move from it.
+    A trough is confirmed when price subsequently rises  >= min_move from it.
+    The trailing unconfirmed extreme is NOT returned (caller marks it NaN).
+    """
+    vals   = close.values
+    n      = len(vals)
+    events = []
+
+    # Track running high and low to establish first direction
+    running_high = vals[0]; running_high_pos = 0
+    running_low  = vals[0]; running_low_pos  = 0
+    direction    = None
+    extreme_val  = vals[0]; extreme_pos = 0
+
+    for i in range(1, n):
+        v = vals[i]
+
+        if direction is None:
+            if v > running_high:
+                running_high = v; running_high_pos = i
+            if v < running_low:
+                running_low  = v; running_low_pos  = i
+
+            drop = (running_high - v) / running_high if running_high > 0 else 0
+            rise = (v - running_low)  / running_low  if running_low  > 0 else 0
+
+            if drop >= min_move and drop >= rise:
+                events.append((running_high_pos, "peak"))
+                direction = "down"; extreme_val = v; extreme_pos = i
+            elif rise >= min_move:
+                events.append((running_low_pos, "trough"))
+                direction = "up";   extreme_val = v; extreme_pos = i
+
+        elif direction == "up":
+            if v > extreme_val:
+                extreme_val = v; extreme_pos = i
+            elif extreme_val > 0 and (extreme_val - v) / extreme_val >= min_move:
+                events.append((extreme_pos, "peak"))
+                direction = "down"; extreme_val = v; extreme_pos = i
+
+        else:  # direction == "down"
+            if v < extreme_val:
+                extreme_val = v; extreme_pos = i
+            elif extreme_val > 0 and (v - extreme_val) / extreme_val >= min_move:
+                events.append((extreme_pos, "trough"))
+                direction = "up";   extreme_val = v; extreme_pos = i
+
+    return events
+
+
+def label_regime_drawdown(
+    df:           pd.DataFrame,
+    min_move:     float = 0.05,   # minimum % price move to confirm peak/trough
+    panic_thresh: float = 0.07,   # peak-to-trough drawdown threshold: PANIC_BEAR vs QUIET_BEAR
+    vol_window:   int   = 20,     # rolling window for realized vol (bull classification)
+    vol_baseline: int   = 252,    # long-run median baseline for vol comparison
+    close_col:    str   = "Close",
+) -> pd.DataFrame:
+    """
+    Assign ground-truth regime using drawdown-based peak/trough detection.
+
+    Hybrid two-axis classification
+    ------------------------------
+    Direction axis — locked per confirmed zigzag segment:
+        Peak → Trough : BEAR direction
+        Trough → Peak : BULL direction
+
+    Volatility axis — computed per day within each segment:
+        realized_vol[t] > vol_median[t] → high vol
+        realized_vol[t] ≤ vol_median[t] → low vol
+
+    Combined per day:
+        BEAR + high vol → PANIC_BEAR
+        BEAR + low  vol → QUIET_BEAR
+        BULL + high vol → VOLATILE_BULL
+        BULL + low  vol → QUIET_BULL
+
+    Direction is fixed by the confirmed zigzag (no early-transition bias,
+    no endpoint-only bias).  Vol varies day by day so sharp vol spikes
+    inside a calm trend are captured without needing a new peak/trough.
+
+    The trailing unconfirmed segment after the last peak/trough is left NaN.
+    """
+    df       = df.copy().reset_index(drop=True)
+    close    = df[close_col]
+    log_ret  = np.log(close).diff()
+
+    realized_vol = log_ret.rolling(vol_window).std()
+    vol_median   = realized_vol.rolling(vol_baseline).median()
+    vol_median   = vol_median.fillna(realized_vol.expanding().median())
+    is_high_vol  = realized_vol > vol_median   # per-day boolean Series
+
+    events = _find_peaks_troughs(close, min_move)
+    regime = pd.Series(np.nan, index=df.index, name="true_regime")
+
+    if not events:
+        df["true_regime"]      = np.nan
+        df["true_regime_name"] = np.nan
+        return df
+
+    def _label_segment(s: int, e: int, is_bear: bool) -> None:
+        for t in range(s, e):
+            high_vol = bool(is_high_vol.iloc[t]) if pd.notna(is_high_vol.iloc[t]) else False
+            if is_bear:
+                regime.iloc[t] = float(REGIME_IDS["PANIC_BEAR" if high_vol else "QUIET_BEAR"])
+            else:
+                regime.iloc[t] = float(REGIME_IDS["VOLATILE_BULL" if high_vol else "QUIET_BULL"])
+
+    # ── Initial segment before first confirmed event ──────────────────────────
+    first_pos, first_type = events[0]
+    _label_segment(0, first_pos, is_bear=(first_type == "trough"))
+
+    # ── Confirmed segments between consecutive events ─────────────────────────
+    for k in range(len(events) - 1):
+        pos_start, etype_start = events[k]
+        pos_end, _             = events[k + 1]
+        _label_segment(pos_start, pos_end, is_bear=(etype_start == "peak"))
+
+    # ── Trailing unconfirmed segment → NaN ───────────────────────────────────
+    regime.iloc[events[-1][0]:] = np.nan
+
+    df["true_regime"]      = regime
+    df["true_regime_name"] = df["true_regime"].map(
+        lambda x: REGIME_NAME.get(int(x)) if pd.notna(x) else np.nan
+    )
+    return df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Agreement statistics
 # ─────────────────────────────────────────────────────────────────────────────
 
 def print_regime_agreement(
@@ -272,29 +408,41 @@ def _confusion_heatmap(ax: plt.Axes, df: pd.DataFrame) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def plot_regime(
-    data_path:   str,
-    window:      int = 20,      # true-regime window in trading days
-    vol_baseline: int = 252,    # long-run vol baseline for true regime
-    save_path:   str | None = None,
+    data_path:    str,
+    window:       int   = 20,       # window for label_true_regime (ignored for drawdown)
+    vol_baseline: int   = 252,
+    label_method: str   = "window", # "window" | "drawdown"
+    min_move:     float = 0.15,     # drawdown method: min % move to confirm peak/trough
+    panic_thresh: float = 0.20,     # drawdown method: drawdown threshold for PANIC_BEAR
+    save_path:    str | None = None,
 ) -> None:
     """
-    4-panel chart comparing detect_regime() against label_true_regime().
+    4-panel chart comparing detect_regime() against a ground-truth labeler.
+
+    label_method="window"   → label_true_regime  (forward rolling-window)
+    label_method="drawdown" → label_regime_drawdown (zigzag peak/trough)
 
     Panel 1 (tall) : Close price + detected-regime background shading
     Panel 2        : Detected regime bar  (model)
-    Panel 3        : True regime bar      (actual monthly return)
+    Panel 3        : True regime bar      (ground truth)
     Panel 4        : Confusion matrix heatmap (agreement breakdown)
     """
     raw = pd.read_csv(data_path)
     raw["TradingDate"] = pd.to_datetime(raw["TradingDate"])
     market_index = infer_market_index_from_filename(data_path)
 
-    # detect_regime via build_conditional_features
     df = build_conditional_features(raw, market_index=market_index)
     df = df.sort_values("TradingDate").reset_index(drop=True)
 
-    # true regime via realised return + realised volatility
-    df = label_true_regime(df, window=window, vol_baseline=vol_baseline)
+    if label_method == "drawdown":
+        df = label_regime_drawdown(
+            df, min_move=min_move, panic_thresh=panic_thresh,
+            vol_window=window, vol_baseline=vol_baseline,
+        )
+        method_label = f"drawdown(min_move={min_move}, panic={panic_thresh})"
+    else:
+        df = label_true_regime(df, window=window, vol_baseline=vol_baseline)
+        method_label = f"window={window}d"
 
     ticker = os.path.basename(data_path).split("-")[0]
 
@@ -315,7 +463,7 @@ def plot_regime(
 
     fig.suptitle(
         f"{ticker}  —  Detected Regime vs True Regime  "
-        f"(window={window}d, vol_baseline={vol_baseline}d)",
+        f"({method_label}, vol_baseline={vol_baseline}d)",
         fontsize=13, fontweight="bold",
     )
 
@@ -403,10 +551,23 @@ def plot_regime(
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    DATA_PATH = "./data/data-vn-20230228/stock-historical-data/VCB-VNINDEX-History.csv"
+    DATA_PATH = "./data/data-vn-20230228/stock-historical-data/VHM-VNINDEX-History.csv"
+
+    # Window-based ground truth
     plot_regime(
         DATA_PATH,
         window=20,
         vol_baseline=252,
-        save_path="./data/regime_comparison_VCB.png",
+        label_method="window",
+        save_path="./data/regime_comparison_VHM_window.png",
+    )
+
+    # Drawdown-based ground truth — short-term (catches intra-trend swings)
+    plot_regime(
+        DATA_PATH,
+        vol_baseline=252,
+        label_method="drawdown",
+        min_move=0.07,
+        panic_thresh=0.10,
+        save_path="./data/regime_comparison_VHM_drawdown.png",
     )

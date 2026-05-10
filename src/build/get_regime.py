@@ -627,7 +627,7 @@ def _build_shared_base(
     #   × (1 - cascade_norm)                                [NOT already in cascade]
     #   × (1 - vol_regime_spike)                            [volatility NOT elevated]
     #   × (1 - (down_ratio > 0.6))                          [market NOT broadly weak]
-    #
+    
     # High value → very oversold in a stable market → strong bounce candidate
     # Low value → either not oversold OR system is in stress (gated out)
     #
@@ -776,7 +776,7 @@ def _build_quiet_bull_features(g: pd.DataFrame) -> pd.DataFrame:
     Signal type: trend-following. Detect early signs of acceleration.
 
     New features (Obs 2, 4, 5):
-      smart_money_up         — up-day + volume: foreign buying into dip
+      smart_money_up         — large buying on up days with volume can confirm the rally
       volume_price_divergence— price up but volume fading → rally losing fuel
       intraday_distribution  — up day but closed low → ATC institutional selling
       limit_open_reversal    — hit limit-up yesterday, sold off today → distribution top
